@@ -4,7 +4,6 @@
 # Causa RCA Installer — Main Orchestrator
 #
 # Provisions the target environment and deploys the full RCA stack:
-#   - Prometheus Stack (kube-prometheus-stack) + Alertmanager webhook → Causa
 #   - Kubernetes MCP Server
 #   - Causa Backend (RCA engine)
 #   - Async Profiler
@@ -51,7 +50,7 @@ export KUBE_CLI
 
 # Target platform — determines which infrastructure steps run.
 # Supported values: kind
-# kind  → creates a Kind cluster + local registry + installs Prometheus stack
+# kind  → creates a Kind cluster + local registry (no Prometheus — RCA is triggered on demand via Bob)
 INSTALL_TARGET="${INSTALL_TARGET:-kind}"
 export INSTALL_TARGET
 
@@ -81,7 +80,6 @@ source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/install_utils.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
-source "${SCRIPT_DIR}/lib/install_prometheus.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
 
 # ---------------------------------------------------------------------------
@@ -169,20 +167,7 @@ main() {
     # ── Track installed components ───────────────────────────────────────────
     local installed_components=()
 
-    # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
-    if _is_kind_target; then
-        start_spinner "Installing Prometheus Stack (kube-prometheus-stack)..."
-        if ! install_prometheus; then
-            stop_spinner
-            log_error "Failed to install Prometheus Stack"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "Prometheus Stack (kube-prometheus-stack)"
-        installed_components+=("Prometheus Stack")
-    fi
-
-    # ── Step 3: Kubernetes MCP Server ───────────────────────────────────────
+    # ── Step 2: Kubernetes MCP Server ───────────────────────────────────────
     start_spinner "Installing Kubernetes MCP Server..."
     if ! install_kubernetes_mcp_server; then
         stop_spinner
@@ -229,13 +214,6 @@ uninstall_main() {
     fi
     stop_spinner; log_uninstall_success "Kubernetes MCP Server"
 
-    # Uninstall Prometheus Stack (kind target only — it was installed by us)
-    if _is_kind_target; then
-        start_spinner "Uninstalling Prometheus Stack..."
-        uninstall_prometheus
-        stop_spinner; log_uninstall_success "Prometheus Stack"
-    fi
-
     # Optionally delete the Kind cluster entirely
     if _is_kind_target; then
         if [[ "${DELETE_CLUSTER:-false}" == "true" ]]; then
@@ -273,6 +251,7 @@ show_usage() {
     echo ""
     echo "OPTIONS:"
     echo "    --target TARGET               Target platform: kind (default: kind)"
+    echo "                                  kind  — provisions a local Kind cluster"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
     echo "    --delete-cluster              Also delete the Kind cluster when terminating"
@@ -293,7 +272,6 @@ show_usage() {
     echo "    KIND_REGISTRY_PORT            Override local registry port"
     echo "    DRY_RUN=true                  Dry run mode"
     echo "    TERMINATE=true                Uninstall mode"
-    echo "    PROMETHEUS_NAMESPACE=NAME     Namespace for kube-prometheus-stack (default: monitoring)"
     echo "    DELETE_CLUSTER=true           Delete cluster on --terminate"
     echo ""
 }

@@ -29,7 +29,7 @@ validate_prerequisites() {
         container_runtime="podman"
     fi
 
-    local required_tools=("kubectl" "kind" "helm" "curl" "grep" "sed" "awk")
+    local required_tools=("kubectl" "kind" "curl" "grep" "sed" "awk")
     [[ -z "${container_runtime}" ]] && required_tools+=("docker")  # will fail with a clear message
 
     for tool in "${required_tools[@]}"; do
@@ -46,7 +46,6 @@ validate_prerequisites() {
         log_error "Install them and retry."
         log_error "  - kind:    https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
         log_error "  - kubectl: https://kubernetes.io/docs/tasks/tools/"
-        log_error "  - helm:    https://helm.sh/docs/intro/install/"
         return 1
     fi
 
