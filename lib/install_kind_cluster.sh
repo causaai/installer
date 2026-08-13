@@ -62,12 +62,16 @@ _start_local_registry() {
     # podman run does not support --restart=always in the same way; use 'unless-stopped' equivalent
     [[ "${runtime}" == "podman" ]] && restart_flag=""
 
+    # Use the runtime's default network for Podman; 'bridge' for Docker.
+    local network_flag="--network bridge"
+    [[ "${runtime}" == "podman" ]] && network_flag=""
+
     ${runtime} run -d \
         ${restart_flag:+${restart_flag}} \
         --name "${KIND_REGISTRY_NAME}" \
         -p "127.0.0.1:${KIND_REGISTRY_PORT}:5000" \
-        --network bridge \
-        registry:2 >>"${LOG_FILE}" 2>&1
+        ${network_flag:+${network_flag}} \
+        registry:2 >>"${LOG_FILE:-/dev/null}" 2>&1
 
     write_to_log_file "SUCCESS" "Local registry started at localhost:${KIND_REGISTRY_PORT}"
     return 0

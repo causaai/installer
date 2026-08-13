@@ -27,17 +27,17 @@ export SCRIPT_DIR INSTALL_NAMESPACE KUBE_CLI DRY_RUN K8S_MCP_SERVER_IMAGE
 install_kubernetes_mcp_server() {
     log_section_silent "Installing Kubernetes MCP Server"
 
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        write_to_log_file "INFO" "Dry run — skipping apply"
+        return 0
+    fi
+
     if ! create_namespace; then return 1; fi
 
     local manifest="${SCRIPT_DIR}/manifests/k8s_mcp_server.yaml"
     local img="${K8S_MCP_SERVER_IMAGE}"
 
     write_to_log_file "INFO" "Using image: ${img}"
-
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        write_to_log_file "INFO" "Dry run — skipping apply"
-        return 0
-    fi
 
     if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}" \
         "image: .*kubernetes_mcp_server.*" "${img}"; then
