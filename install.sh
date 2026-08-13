@@ -83,6 +83,12 @@ source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
 
 # ---------------------------------------------------------------------------
+# Activate opt-in traps (scoped here, not in shared libraries)
+# ---------------------------------------------------------------------------
+enable_cleanup_trap   # lib/install_utils.sh — log error on unexpected EXIT
+enable_spinner_trap   # lib/logging.sh       — stop spinner cleanly on INT/TERM
+
+# ---------------------------------------------------------------------------
 # Logging initialisation
 # ---------------------------------------------------------------------------
 initialize_logging() {
