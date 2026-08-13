@@ -231,60 +231,44 @@ post_component_validation() {
     fi
 
     local failed=0
-    local k8s_mcp_status="${COLOR_BOLD_RED}Kubernetes MCP Server ✗${COLOR_RESET}"
-    local causa_status="${COLOR_BOLD_RED}Causa Backend ✗${COLOR_RESET}"
-    local async_ctrl_status="${COLOR_BOLD_RED}Async Profiler ✗${COLOR_RESET}"
-    local async_mcp_status="${COLOR_BOLD_RED}Async Profiler MCP Server ✗${COLOR_RESET}"
-    local quarkus_status="${COLOR_BOLD_RED}Quarkus MCP Server ✗${COLOR_RESET}"
-    local causa_mcp_status="${COLOR_BOLD_RED}Causa MCP Server ✗${COLOR_RESET}"
 
-    # K8s MCP
-    if ${KUBE_CLI} get deployment kubernetes-mcp-server -n "${INSTALL_NAMESPACE}" &>/dev/null; then
-        local rr; rr=$(${KUBE_CLI} get deployment kubernetes-mcp-server -n "${INSTALL_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-        local dr; dr=$(${KUBE_CLI} get deployment kubernetes-mcp-server -n "${INSTALL_NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
-        if [[ "${rr:-0}" == "${dr}" ]]; then
-            k8s_mcp_status="${COLOR_BOLD_GREEN}Kubernetes MCP Server ✓${COLOR_RESET}"
-            write_to_log_file "SUCCESS" "Kubernetes MCP Server is healthy"
+    # ---------------------------------------------------------------------------
+    # _check_deployment <display-name> <deployment-name> <status-var-name>
+    # Sets the named variable to a green/red status string; increments failed if
+    # the deployment is absent or not fully ready. Skips (marks N/A) when the
+    # deployment does not exist, since some components are optional.
+    # ---------------------------------------------------------------------------
+    _check_deployment() {
+        local display="$1" deploy="$2" var="$3"
+        local rr dr
+        if ${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" &>/dev/null; then
+            rr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
+                    -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            dr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
+                    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+            if [[ "${rr:-0}" == "${dr}" ]]; then
+                printf -v "${var}" '%b' "${COLOR_BOLD_GREEN}${display} ✓${COLOR_RESET}"
+                write_to_log_file "SUCCESS" "${display} is healthy"
+            else
+                printf -v "${var}" '%b' "${COLOR_BOLD_RED}${display} ✗${COLOR_RESET}"
+                write_to_log_file "ERROR" "${display} pods not ready: ${rr:-0}/${dr}"
+                (( failed++ ))
+            fi
         else
-            write_to_log_file "ERROR" "Kubernetes MCP Server pods not ready: ${rr:-0}/${dr}"
-            (( failed++ ))
+            # Deployment not present — treat as not installed (N/A), not a failure
+            printf -v "${var}" '%b' "${COLOR_YELLOW}${display} — not installed${COLOR_RESET}"
+            write_to_log_file "INFO" "${display} deployment not found (skipped)"
         fi
-    else
-        write_to_log_file "WARN" "Kubernetes MCP Server deployment not found"
-        (( failed++ ))
-    fi
+    }
 
-    # Causa Backend
-    if ${KUBE_CLI} get deployment causa-backend -n "${INSTALL_NAMESPACE}" &>/dev/null; then
-        local rr; rr=$(${KUBE_CLI} get deployment causa-backend -n "${INSTALL_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-        local dr; dr=$(${KUBE_CLI} get deployment causa-backend -n "${INSTALL_NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
-        if [[ "${rr:-0}" == "${dr}" ]]; then
-            causa_status="${COLOR_BOLD_GREEN}Causa Backend ✓${COLOR_RESET}"
-            write_to_log_file "SUCCESS" "Causa Backend is healthy"
-        else
-            write_to_log_file "ERROR" "Causa Backend pods not ready: ${rr:-0}/${dr}"
-            (( failed++ ))
-        fi
-    else
-        write_to_log_file "WARN" "Causa Backend deployment not found"
-        (( failed++ ))
-    fi
+    local k8s_mcp_status causa_status async_ctrl_status async_mcp_status quarkus_status causa_mcp_status
 
-    # Causa MCP Server
-    if ${KUBE_CLI} get deployment causa-mcp -n "${INSTALL_NAMESPACE}" &>/dev/null; then
-        local rr; rr=$(${KUBE_CLI} get deployment causa-mcp -n "${INSTALL_NAMESPACE}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-        local dr; dr=$(${KUBE_CLI} get deployment causa-mcp -n "${INSTALL_NAMESPACE}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
-        if [[ "${rr:-0}" == "${dr}" ]]; then
-            causa_mcp_status="${COLOR_BOLD_GREEN}Causa MCP Server ✓${COLOR_RESET}"
-            write_to_log_file "SUCCESS" "Causa MCP Server is healthy"
-        else
-            write_to_log_file "ERROR" "Causa MCP Server pods not ready: ${rr:-0}/${dr}"
-            (( failed++ ))
-        fi
-    else
-        write_to_log_file "WARN" "Causa MCP Server deployment not found"
-        (( failed++ ))
-    fi
+    _check_deployment "Kubernetes MCP Server"    "kubernetes-mcp-server"  k8s_mcp_status
+    _check_deployment "Causa Backend"            "causa-backend"          causa_status
+    _check_deployment "Async Profiler"           "async-profiler"         async_ctrl_status
+    _check_deployment "Async Profiler MCP"       "async-profiler-mcp"     async_mcp_status
+    _check_deployment "Quarkus MCP Server"       "quarkus-mcp"            quarkus_status
+    _check_deployment "Causa MCP Server"         "causa-mcp"              causa_mcp_status
 
     {
         echo ""

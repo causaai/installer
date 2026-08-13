@@ -36,8 +36,24 @@ readonly LOG_LEVEL_WARN=2
 readonly LOG_LEVEL_ERROR=3
 readonly LOG_LEVEL_SUCCESS=4
 
-# Current log level (can be overridden by environment variable)
-CURRENT_LOG_LEVEL="${LOG_LEVEL:-${LOG_LEVEL_INFO}}"
+# Current log level (can be overridden by environment variable).
+# Accepts numeric values (0–4) or string names: DEBUG, INFO, WARN, ERROR, SUCCESS.
+_parse_log_level() {
+    local val="${1:-}"
+    case "${val}" in
+        0|DEBUG)   echo "${LOG_LEVEL_DEBUG}" ;;
+        1|INFO)    echo "${LOG_LEVEL_INFO}" ;;
+        2|WARN)    echo "${LOG_LEVEL_WARN}" ;;
+        3|ERROR)   echo "${LOG_LEVEL_ERROR}" ;;
+        4|SUCCESS) echo "${LOG_LEVEL_SUCCESS}" ;;
+        *)
+            # Unknown value — default to INFO and warn on stderr
+            echo "${LOG_LEVEL_INFO}"
+            echo "[WARN] LOG_LEVEL '${val}' is not recognised; defaulting to INFO (1)" >&2
+            ;;
+    esac
+}
+CURRENT_LOG_LEVEL="$(_parse_log_level "${LOG_LEVEL:-1}")"
 
 # Log file path (optional)
 LOG_FILE="${LOG_FILE:-}"
@@ -357,12 +373,20 @@ stop_spinner() {
 }
 
 ################################################################################
-# Trap handler — stop spinner cleanly on INT or TERM
+# _spinner_cleanup_trap — internal handler, stops the spinner on signal
 ################################################################################
 _spinner_cleanup_trap() {
     stop_spinner
 }
-trap '_spinner_cleanup_trap' INT TERM
+
+################################################################################
+# enable_spinner_trap
+# Opt-in: call this from the top-level installer entrypoint after sourcing this
+# library. Not called automatically to avoid overriding callers' own traps.
+################################################################################
+enable_spinner_trap() {
+    trap '_spinner_cleanup_trap' INT TERM
+}
 
 ################################################################################
 # Initialize logging
@@ -400,13 +424,14 @@ init_logging() {
 ################################################################################
 set_log_level() {
     local level="$1"
-    CURRENT_LOG_LEVEL="${level}"
-    log_debug "Log level set to: ${level}"
+    CURRENT_LOG_LEVEL="$(_parse_log_level "${level}")"
+    log_debug "Log level set to: ${CURRENT_LOG_LEVEL}"
 }
 
 ################################################################################
 # Export functions for use in other scripts
 ################################################################################
+export -f _parse_log_level
 export -f get_timestamp
 export -f write_to_log_file
 export -f log_debug
@@ -427,6 +452,8 @@ export -f log_install_success
 export -f log_uninstall_success
 export -f start_spinner
 export -f stop_spinner
+export -f _spinner_cleanup_trap
+export -f enable_spinner_trap
 export -f init_logging
 export -f set_log_level
 

@@ -23,7 +23,7 @@ readonly EXIT_INSTALLATION_FAILED=4
 readonly EXIT_VALIDATION_FAILED=5
 
 ################################################################################
-# Error / cleanup traps
+# Error / cleanup
 ################################################################################
 cleanup_on_error() {
     local exit_code=$?
@@ -34,7 +34,15 @@ cleanup_on_error() {
         fi
     fi
 }
-trap cleanup_on_error EXIT
+
+################################################################################
+# enable_cleanup_trap
+# Opt-in: call this from the top-level installer entrypoint after sourcing this
+# library. Not called automatically to avoid interfering with callers' own traps.
+################################################################################
+enable_cleanup_trap() {
+    trap cleanup_on_error EXIT
+}
 
 handle_error() {
     local exit_code="$1"
@@ -69,6 +77,7 @@ detect_arch() {
 
 ################################################################################
 # Cross-platform timeout helper
+# Preference order: GNU timeout → perl → no-timeout fallback (with warning)
 ################################################################################
 run_with_timeout() {
     local timeout_duration="$1"; shift
@@ -76,18 +85,24 @@ run_with_timeout() {
         timeout "${timeout_duration}" "$@"
         return $?
     fi
-    perl -e '
-        use POSIX ":sys_wait_h";
-        my $t = shift; my $pid = fork();
-        if ($pid == 0) { exec(@ARGV) or die "exec: $!\n"; }
-        my $s = time();
-        while (1) {
-            my $k = waitpid($pid, WNOHANG);
-            exit($? >> 8) if $k == $pid;
-            if (time()-$s >= $t) { kill 15,$pid; sleep 2; kill 9,$pid; waitpid($pid,0); exit(124); }
-            sleep 1;
-        }
-    ' "${timeout_duration}" "$@"
+    if command -v perl &>/dev/null; then
+        perl -e '
+            use POSIX ":sys_wait_h";
+            my $t = shift; my $pid = fork();
+            if ($pid == 0) { exec(@ARGV) or die "exec: $!\n"; }
+            my $s = time();
+            while (1) {
+                my $k = waitpid($pid, WNOHANG);
+                exit($? >> 8) if $k == $pid;
+                if (time()-$s >= $t) { kill 15,$pid; sleep 2; kill 9,$pid; waitpid($pid,0); exit(124); }
+                sleep 1;
+            }
+        ' "${timeout_duration}" "$@"
+        return $?
+    fi
+    # Neither timeout nor perl available — run without a timeout and warn
+    log_warn "run_with_timeout: neither 'timeout' nor 'perl' found; running '${*}' without a timeout"
+    "$@"
     return $?
 }
 
@@ -243,6 +258,7 @@ delete_manifest() {
 # Export
 # ---------------------------------------------------------------------------
 export -f cleanup_on_error
+export -f enable_cleanup_trap
 export -f handle_error
 export -f detect_os
 export -f detect_arch
