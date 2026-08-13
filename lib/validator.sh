@@ -96,13 +96,17 @@ validate_docker_running() {
 validate_cluster_access() {
     log_file_only "Validating cluster access"
 
+    # Capture the current context so we can restore it afterwards.
+    local prev_ctx
+    prev_ctx=$(${KUBE_CLI} config current-context 2>/dev/null || echo "")
+
     # For the kind target, the context is always kind-<cluster-name>.
     # Switch to it explicitly so we never accidentally validate the wrong cluster.
     if [[ "${INSTALL_TARGET:-kind}" == "kind" ]]; then
         local kind_ctx="kind-${KIND_CLUSTER_NAME:-causa-rca}"
         if ${KUBE_CLI} config get-contexts "${kind_ctx}" &>/dev/null; then
-            ${KUBE_CLI} config use-context "${kind_ctx}" >>"${LOG_FILE}" 2>&1 || true
-            write_to_log_file "INFO" "Switched kubectl context to ${kind_ctx}"
+            ${KUBE_CLI} config use-context "${kind_ctx}" >>"${LOG_FILE:-/dev/null}" 2>&1 || true
+            write_to_log_file "INFO" "Switched kubectl context to ${kind_ctx} (was: ${prev_ctx:-none})"
         else
             log_error "Kind context '${kind_ctx}' not found in kubeconfig."
             log_error "The Kind cluster may not have been created yet — this should not happen at this stage."
@@ -114,9 +118,21 @@ validate_cluster_access() {
     ctx=$(${KUBE_CLI} config current-context 2>/dev/null || echo "")
     write_to_log_file "INFO" "Current context: ${ctx}"
 
+    local rc=0
     if ! ${KUBE_CLI} cluster-info --request-timeout=10s &>/dev/null; then
         log_error "Cannot reach the cluster API server (context: ${ctx})"
         log_error "Ensure the Kind cluster is running:  kind get clusters"
+        rc=1
+    fi
+
+    # Restore the previous context so the installer doesn't leave the user's
+    # kubeconfig pointing at the Kind cluster after validation.
+    if [[ -n "${prev_ctx}" && "${prev_ctx}" != "${ctx}" ]]; then
+        ${KUBE_CLI} config use-context "${prev_ctx}" >>"${LOG_FILE:-/dev/null}" 2>&1 || true
+        write_to_log_file "INFO" "Restored kubectl context to ${prev_ctx}"
+    fi
+
+    if [[ ${rc} -ne 0 ]]; then
         return 1
     fi
 

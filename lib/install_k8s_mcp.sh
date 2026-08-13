@@ -11,6 +11,16 @@
 if [[ -n "${INSTALL_K8S_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_K8S_MCP_LIB_LOADED=1
 
+# ---------------------------------------------------------------------------
+# Global variable defaults — safe to source standalone or from other entrypoints
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+INSTALL_NAMESPACE="${INSTALL_NAMESPACE:-causa-rca}"
+KUBE_CLI="${KUBE_CLI:-kubectl}"
+DRY_RUN="${DRY_RUN:-false}"
+K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
+export SCRIPT_DIR INSTALL_NAMESPACE KUBE_CLI DRY_RUN K8S_MCP_SERVER_IMAGE
+
 ################################################################################
 # install_kubernetes_mcp_server
 ################################################################################
@@ -41,7 +51,7 @@ install_kubernetes_mcp_server() {
     fi
 
     write_to_log_file "SUCCESS" "Kubernetes MCP Server installed"
-    write_to_log_file "INFO"    "NodePort: localhost:30000/mcp  (when port-forward is active)"
+    write_to_log_file "INFO"    "NodePort: http://localhost:30000/mcp"
     return 0
 }
 

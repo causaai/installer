@@ -18,8 +18,14 @@ fi
 readonly INSTALL_KIND_CLUSTER_LIB_LOADED=1
 
 # ---------------------------------------------------------------------------
-# Constants (overridable via env vars before sourcing this file)
+# Global variable defaults — safe to source standalone or from other entrypoints
 # ---------------------------------------------------------------------------
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
+DRY_RUN="${DRY_RUN:-false}"
+export SCRIPT_DIR CONTAINER_RUNTIME DRY_RUN
+
+# Kind-specific constants (overridable via env vars before sourcing this file)
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-causa-rca}"
 KIND_REGISTRY_NAME="${KIND_REGISTRY_NAME:-causa-rca-registry}"
 KIND_REGISTRY_PORT="${KIND_REGISTRY_PORT:-5001}"
