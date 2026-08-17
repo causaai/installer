@@ -9,7 +9,7 @@ if [[ -n "${INSTALL_ASYNC_PROFILER_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_ASYNC_PROFILER_LIB_LOADED=1
 
 _async_profiler_not_released() {
-    [[ "${ASYNC_PROFILER_IMAGE}" == "quay.io/causaai/async-profiler:latest" ]]
+    [[ -z "${ASYNC_PROFILER_IMAGE:-}" ]]
 }
 
 ################################################################################
