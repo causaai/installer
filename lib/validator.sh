@@ -282,7 +282,7 @@ post_component_validation() {
     _check_deployment "Causa Backend"            "causa-backend"          causa_status
     _check_deployment "Async Profiler"           "async-profiler"         async_ctrl_status
     _check_deployment "Async Profiler MCP"       "async-profiler-mcp"     async_mcp_status
-    _check_deployment "Quarkus MCP Server"       "quarkus-mcp"            quarkus_status
+    _check_deployment "Quarkus MCP Server"       "mcp-metrics"            quarkus_status
     _check_deployment "Causa MCP Server"         "causa-mcp"              causa_mcp_status
 
     {
