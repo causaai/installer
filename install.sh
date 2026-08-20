@@ -70,24 +70,30 @@ export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 # Image variables (populated by images.env; can be overridden via CLI flags)
 K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
 CAUSA_BACKEND_IMAGE="${CAUSA_BACKEND_IMAGE:-}"
-ASYNC_PROFILER_IMAGE="${ASYNC_PROFILER_IMAGE:-}"
 ASYNC_PROFILER_MCP_IMAGE="${ASYNC_PROFILER_MCP_IMAGE:-}"
 QUARKUS_MCP_IMAGE="${QUARKUS_MCP_IMAGE:-}"
 CAUSA_MCP_IMAGE="${CAUSA_MCP_IMAGE:-}"
+JAFRA_CONTROLLER_IMAGE="${JAFRA_CONTROLLER_IMAGE:-}"
+JAFRA_AGENT_IMAGE="${JAFRA_AGENT_IMAGE:-}"
+JAFRA_ANALYZER_IMAGE="${JAFRA_ANALYZER_IMAGE:-}"
 export K8S_MCP_SERVER_IMAGE CAUSA_BACKEND_IMAGE
-export ASYNC_PROFILER_IMAGE ASYNC_PROFILER_MCP_IMAGE
+export ASYNC_PROFILER_MCP_IMAGE
 export QUARKUS_MCP_IMAGE CAUSA_MCP_IMAGE
+export JAFRA_CONTROLLER_IMAGE JAFRA_AGENT_IMAGE JAFRA_ANALYZER_IMAGE
 
 # Sentinel flags — set to "true" only when a CLI flag explicitly overrides an image
 K8S_MCP_SERVER_IMAGE_OVERRIDDEN=false
 CAUSA_BACKEND_IMAGE_OVERRIDDEN=false
-ASYNC_PROFILER_IMAGE_OVERRIDDEN=false
 ASYNC_PROFILER_MCP_IMAGE_OVERRIDDEN=false
 QUARKUS_MCP_IMAGE_OVERRIDDEN=false
 CAUSA_MCP_IMAGE_OVERRIDDEN=false
+JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=false
+JAFRA_AGENT_IMAGE_OVERRIDDEN=false
+JAFRA_ANALYZER_IMAGE_OVERRIDDEN=false
 export K8S_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_BACKEND_IMAGE_OVERRIDDEN
-export ASYNC_PROFILER_IMAGE_OVERRIDDEN ASYNC_PROFILER_MCP_IMAGE_OVERRIDDEN
+export ASYNC_PROFILER_MCP_IMAGE_OVERRIDDEN
 export QUARKUS_MCP_IMAGE_OVERRIDDEN CAUSA_MCP_IMAGE_OVERRIDDEN
+export JAFRA_CONTROLLER_IMAGE_OVERRIDDEN JAFRA_AGENT_IMAGE_OVERRIDDEN JAFRA_ANALYZER_IMAGE_OVERRIDDEN
 
 # ---------------------------------------------------------------------------
 # Source library files
@@ -96,12 +102,13 @@ source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/install_utils.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
+source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/install_prometheus.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
+source "${SCRIPT_DIR}/lib/install_jafra.sh"
+source "${SCRIPT_DIR}/lib/install_async_profiler_mcp.sh"
 source "${SCRIPT_DIR}/lib/install_postgres.sh"
 source "${SCRIPT_DIR}/lib/install_causa.sh"
-source "${SCRIPT_DIR}/lib/install_async_profiler.sh"
-source "${SCRIPT_DIR}/lib/install_async_profiler_mcp.sh"
 source "${SCRIPT_DIR}/lib/install_quarkus_mcp.sh"
 source "${SCRIPT_DIR}/lib/install_causa_mcp.sh"
 
@@ -201,7 +208,20 @@ main() {
     # ── Track installed components ───────────────────────────────────────────
     local installed_components=()
 
-    # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
+    # ── Step 2: cert-manager (kind target only, required by Jafra) ───────────
+    if _is_kind_target; then
+        start_spinner "Installing cert-manager..."
+        if ! install_cert_manager; then
+            stop_spinner
+            log_error "Failed to install cert-manager"
+            exit 1
+        fi
+        stop_spinner
+        log_install_success "cert-manager"
+        installed_components+=("cert-manager")
+    fi
+
+    # ── Step 3: Prometheus Stack (kind target only) ──────────────────────────
     if _is_kind_target; then
         start_spinner "Installing Prometheus Stack (kube-prometheus-stack)..."
         if ! install_prometheus; then
@@ -214,7 +234,7 @@ main() {
         installed_components+=("Prometheus Stack")
     fi
 
-    # ── Step 3: Kubernetes MCP Server ───────────────────────────────────────
+    # ── Step 4: Kubernetes MCP Server ───────────────────────────────────────
     start_spinner "Installing Kubernetes MCP Server..."
     if ! install_kubernetes_mcp_server; then
         stop_spinner
@@ -225,18 +245,18 @@ main() {
     log_install_success "Kubernetes MCP Server"
     installed_components+=("Kubernetes MCP Server")
 
-    # ── Step 4: Async Profiler ───────────────────────────────────────────────
-    start_spinner "Installing Async Profiler..."
-    if ! install_async_profiler; then
+    # ── Step 5: Jafra Ecosystem (Controller + Analyzer + Agent) ──────────────
+    start_spinner "Installing Jafra Ecosystem..."
+    if ! install_jafra; then
         stop_spinner
-        log_warn "Async Profiler installation skipped or failed"
+        log_warn "Jafra installation skipped or failed"
     else
         stop_spinner
-        log_install_success "Async Profiler"
-        installed_components+=("Async Profiler")
+        log_install_success "Jafra Ecosystem"
+        installed_components+=("Jafra Ecosystem")
     fi
 
-    # ── Step 5: Async Profiler MCP Server ────────────────────────────────────
+    # ── Step 6: Async Profiler MCP Server ────────────────────────────────────
     start_spinner "Installing Async Profiler MCP Server..."
     if ! install_async_profiler_mcp; then
         stop_spinner
@@ -247,7 +267,7 @@ main() {
         installed_components+=("Async Profiler MCP Server")
     fi
 
-    # ── Step 6: Quarkus MCP Server ───────────────────────────────────────────
+    # ── Step 7: Quarkus MCP Server ───────────────────────────────────────────
     start_spinner "Installing Quarkus MCP Server..."
     if ! install_quarkus_mcp; then
         stop_spinner
@@ -258,7 +278,7 @@ main() {
         installed_components+=("Quarkus MCP Server")
     fi
 
-    # ── Step 7: PostgreSQL ───────────────────────────────────────────────────
+    # ── Step 8: PostgreSQL ───────────────────────────────────────────────────
     start_spinner "Installing PostgreSQL..."
     if ! install_postgres; then
         stop_spinner
@@ -269,7 +289,7 @@ main() {
     log_install_success "PostgreSQL"
     installed_components+=("PostgreSQL")
 
-    # ── Step 8: Causa Backend ────────────────────────────────────────────────
+    # ── Step 9: Causa Backend ────────────────────────────────────────────────
     start_spinner "Installing Causa Backend..."
     if ! install_causa; then
         stop_spinner
@@ -280,7 +300,7 @@ main() {
     log_install_success "Causa Backend"
     installed_components+=("Causa Backend")
 
-    # ── Step 9: Causa MCP Server ─────────────────────────────────────────────
+    # ── Step 10: Causa MCP Server ────────────────────────────────────────────
     start_spinner "Installing Causa MCP Server..."
     if ! install_causa_mcp; then
         stop_spinner

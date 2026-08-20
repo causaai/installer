@@ -210,8 +210,15 @@ validate_image_overrides() {
 
     _vi "${K8S_MCP_SERVER_IMAGE}"          "--k8s-mcp-server-image"       "${K8S_MCP_SERVER_IMAGE_OVERRIDDEN:-false}"
     _vi "${CAUSA_BACKEND_IMAGE}"           "--causa-backend-image"        "${CAUSA_BACKEND_IMAGE_OVERRIDDEN:-false}"
+<<<<<<< HEAD
+=======
+    _vi "${ASYNC_PROFILER_MCP_IMAGE}"      "--async-profiler-mcp-image"   "${ASYNC_PROFILER_MCP_IMAGE_OVERRIDDEN:-false}"
+>>>>>>> 3c081e3 (Add jafra installation)
     _vi "${QUARKUS_MCP_IMAGE}"             "--quarkus-mcp-image"          "${QUARKUS_MCP_IMAGE_OVERRIDDEN:-false}"
     _vi "${CAUSA_MCP_IMAGE}"               "--causa-mcp-image"            "${CAUSA_MCP_IMAGE_OVERRIDDEN:-false}"
+    _vi "${JAFRA_CONTROLLER_IMAGE}"        "--jafra-controller-image"     "${JAFRA_CONTROLLER_IMAGE_OVERRIDDEN:-false}"
+    _vi "${JAFRA_AGENT_IMAGE}"             "--jafra-agent-image"          "${JAFRA_AGENT_IMAGE_OVERRIDDEN:-false}"
+    _vi "${JAFRA_ANALYZER_IMAGE}"          "--jafra-analyzer-image"       "${JAFRA_ANALYZER_IMAGE_OVERRIDDEN:-false}"
 
     if [[ "${failed}" == "true" ]]; then
         log_error "Image validation failed. Correct the image format and retry."
