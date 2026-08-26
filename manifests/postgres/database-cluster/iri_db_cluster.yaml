@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: iri-db
+spec:
+  instances: 1
+  imageName: PLACEHOLDER_OCP_POSTGRES_IMAGE
+  bootstrap:
+    initdb:
+      database: iri-db
+      owner: causa_backend
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+  storage:
+    size: 10Gi
