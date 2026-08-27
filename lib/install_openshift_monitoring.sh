@@ -82,7 +82,7 @@ _ocp_enable_user_workload_monitoring() {
     fi
 
     write_to_log_file "INFO" "Enabling User Workload Monitoring..."
-    ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1 << EOF
+    if ! ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1 << EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -92,15 +92,35 @@ data:
   config.yaml: |
     enableUserWorkload: true
 EOF
+    then
+        log_error "Failed to apply User Workload Monitoring ConfigMap"
+        return 1
+    fi
 
-    # Wait up to 90s for at least the UWM Prometheus to appear
-    write_to_log_file "INFO" "Waiting for UWM Prometheus to start..."
+    # Wait up to 90s for UWM Prometheus AND Alertmanager to appear so that
+    # topology detection (Topology A vs B) sees the final converged state.
+    write_to_log_file "INFO" "Waiting for UWM components to start (up to 90s)..."
     local waited=0
-    while ! ${KUBE_CLI} get statefulset prometheus-user-workload \
-            -n "${OCP_UWM_NAMESPACE}" &>/dev/null; do
+    while true; do
+        local prom_ready=false am_ready=false
+        ${KUBE_CLI} get statefulset prometheus-user-workload \
+            -n "${OCP_UWM_NAMESPACE}" &>/dev/null && prom_ready=true
+        ${KUBE_CLI} get statefulset alertmanager-user-workload \
+            -n "${OCP_UWM_NAMESPACE}" &>/dev/null && am_ready=true
+
+        # Prometheus must be up; Alertmanager may or may not exist (Topology B
+        # clusters never create it), so we stop waiting once Prometheus is up
+        # AND either the Alertmanager has appeared OR we have waited long enough
+        # to be confident it will not appear (i.e. Topology B).
+        if ${prom_ready}; then
+            if ${am_ready} || [[ ${waited} -ge 30 ]]; then
+                break
+            fi
+        fi
+
         if [[ ${waited} -ge 90 ]]; then
             log_error "Timed out waiting for UWM Prometheus after enabling User Workload Monitoring"
-            log_error "Check: ${KUBE_CLI} get pods -n openshift-monitoring"
+            log_error "Check: ${KUBE_CLI} get pods -n ${OCP_UWM_NAMESPACE}"
             return 1
         fi
         sleep 5; waited=$(( waited + 5 ))
@@ -192,9 +212,9 @@ _ocp_configure_platform_alertmanager() {
     local tmp_cfg; tmp_cfg=$(mktemp /tmp/causa-ocp-am-config-XXXXXX.yaml)
     local tmp_secret; tmp_secret=$(mktemp /tmp/causa-ocp-am-secret-XXXXXX.yaml)
 
-    # Use Python (available on macOS/Linux) to safely merge the YAML.
-    # Falls back to a sed-based approach if python3 is absent.
-    if command -v python3 &>/dev/null; then
+    # Use Python with PyYAML to safely merge the YAML.
+    # Both python3 and the yaml module are required; fail fast if either is absent.
+    if command -v python3 &>/dev/null && python3 -c 'import yaml' &>/dev/null; then
         # Write existing config to a temp file — we cannot use both a pipe and
         # a heredoc to the same python3 process (heredoc wins, pipe is ignored).
         local tmp_in; tmp_in=$(mktemp /tmp/causa-ocp-am-in-XXXXXX.yaml)
@@ -249,27 +269,10 @@ PYEOF
             return 1
         fi
     else
-        # Fallback: append receiver and a simple route via sed/awk
-        write_to_log_file "WARN" "python3 not found — using sed fallback for Alertmanager config merge"
-        {
-            echo "${existing_config}"
-            cat << APPEND
-# causa-rca additions (appended by installer)
-  routes:
-  - matchers:
-    - "namespace = ${INSTALL_NAMESPACE}"
-    receiver: causa-webhook
-    group_by: ['namespace', 'alertname', 'pod']
-    group_wait: 10s
-    group_interval: 1m
-    repeat_interval: 15m
-receivers:
-- name: causa-webhook
-  webhook_configs:
-  - url: "${webhook_url}"
-    send_resolved: true
-APPEND
-        } > "${tmp_cfg}"
+        rm -f "${tmp_cfg}" "${tmp_secret}"
+        log_error "python3 with PyYAML is required to merge Alertmanager config safely"
+        log_error "Install PyYAML:  pip3 install pyyaml"
+        return 1
     fi
 
     if [[ ! -s "${tmp_cfg}" ]]; then

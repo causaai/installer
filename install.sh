@@ -235,6 +235,32 @@ main() {
         fi
     fi
 
+    # ── Step 2a: OpenShift namespace setup (openshift target only) ───────────
+    if _is_openshift_target; then
+        start_spinner "Setting up OpenShift namespace..."
+        if ! install_openshift_infra; then
+            stop_spinner
+            log_error "Failed to set up OpenShift namespace"
+            exit 1
+        fi
+        stop_spinner
+        log_install_success "OpenShift Namespace (${INSTALL_NAMESPACE})"
+        installed_components+=("OpenShift Namespace")
+    fi
+
+    # ── Step 2b: OpenShift monitoring (openshift target only) ────────────────
+    if _is_openshift_target; then
+        start_spinner "Configuring OpenShift User Workload Monitoring..."
+        if ! install_openshift_prometheus; then
+            stop_spinner
+            log_error "Failed to configure OpenShift monitoring"
+            exit 1
+        fi
+        stop_spinner
+        log_install_success "OpenShift Monitoring (UWM Alertmanager webhook)"
+        installed_components+=("OpenShift Monitoring")
+    fi
+
     # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
     if _is_kind_target; then
         start_spinner "Installing Prometheus Stack (kube-prometheus-stack)..."
@@ -430,6 +456,17 @@ uninstall_main() {
         start_spinner "Uninstalling Prometheus Stack..."
         uninstall_prometheus
         stop_spinner; log_uninstall_success "Prometheus Stack"
+    fi
+
+    # Uninstall OpenShift monitoring config (openshift target only)
+    if _is_openshift_target; then
+        start_spinner "Removing OpenShift monitoring configuration..."
+        uninstall_openshift_prometheus
+        stop_spinner; log_uninstall_success "OpenShift Monitoring"
+
+        start_spinner "Removing OpenShift namespace setup..."
+        uninstall_openshift_infra
+        stop_spinner; log_uninstall_success "OpenShift Namespace"
     fi
 
     # Optionally delete the Kind cluster entirely
