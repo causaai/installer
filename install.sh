@@ -112,8 +112,8 @@ source "${SCRIPT_DIR}/lib/install_utils.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/install_prometheus.sh"
-source "${SCRIPT_DIR}/lib/install_openshift_infra.sh"
-source "${SCRIPT_DIR}/lib/install_openshift_monitoring.sh"
+[[ -f "${SCRIPT_DIR}/lib/install_openshift_infra.sh"      ]] && source "${SCRIPT_DIR}/lib/install_openshift_infra.sh"
+[[ -f "${SCRIPT_DIR}/lib/enable_monitoring.sh" ]] && source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
 source "${SCRIPT_DIR}/lib/install_jafra.sh"
@@ -357,7 +357,7 @@ main() {
         installed_components+=("OpenShift Namespace")
 
         start_spinner "Configuring OpenShift User Workload Monitoring..."
-        if ! install_openshift_prometheus; then
+        if ! enable_monitoring; then
             stop_spinner
             log_error "Failed to configure OpenShift monitoring"
             exit 1
@@ -477,7 +477,7 @@ uninstall_main() {
     # Uninstall OpenShift monitoring config (openshift target only)
     if _is_openshift_target; then
         start_spinner "Removing OpenShift monitoring configuration..."
-        uninstall_openshift_prometheus
+        disable_monitoring
         stop_spinner; log_uninstall_success "OpenShift Monitoring"
 
         start_spinner "Removing OpenShift namespace setup..."

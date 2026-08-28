@@ -22,6 +22,8 @@
 #   1. Enables User Workload Monitoring (if not already on)
 #   2. Configures the correct Alertmanager with a webhook receiver pointing to:
 #        http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/webhooks/alerts
+#   3. Applies a PrometheusRule (same alert rules used on Kind)
+#   4. Applies a NetworkPolicy (allows Alertmanager → Causa Backend on port 8080)
 #
 # References:
 #   https://docs.openshift.com/container-platform/latest/monitoring/enabling-monitoring-for-user-defined-projects.html
@@ -29,8 +31,8 @@
 ################################################################################
 
 # Source guard
-if [[ -n "${INSTALL_OPENSHIFT_MONITORING_LIB_LOADED:-}" ]]; then return 0; fi
-readonly INSTALL_OPENSHIFT_MONITORING_LIB_LOADED=1
+if [[ -n "${ENABLE_MONITORING_LIB_LOADED:-}" ]]; then return 0; fi
+readonly ENABLE_MONITORING_LIB_LOADED=1
 
 # ---------------------------------------------------------------------------
 # Constants (overridable via env vars)
@@ -314,10 +316,79 @@ PYEOF
 }
 
 ################################################################################
-# install_openshift_prometheus
-# Enables UWM and wires the Alertmanager webhook receiver.
+# _ocp_apply_prometheus_rule
+# Applies the PrometheusRule manifest to the install namespace.
 ################################################################################
-install_openshift_prometheus() {
+_ocp_apply_prometheus_rule() {
+    local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
+    local manifest="${prom_dir}/prometheusrule.yaml"
+
+    if [[ ! -f "${manifest}" ]]; then
+        write_to_log_file "WARN" "PrometheusRule manifest not found: ${manifest} — skipping"
+        return 0
+    fi
+
+    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${INSTALL_NAMESPACE}"
+    if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}"; then
+        log_error "Failed to apply PrometheusRule"
+        return 1
+    fi
+    write_to_log_file "SUCCESS" "PrometheusRule applied to namespace: ${INSTALL_NAMESPACE}"
+    return 0
+}
+
+################################################################################
+# _ocp_apply_network_policy
+# Allows Alertmanager (platform or UWM namespace) to reach Causa Backend.
+################################################################################
+_ocp_apply_network_policy() {
+    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager → Causa Backend..."
+
+    local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
+
+    # Allow from both possible Alertmanager namespaces so the policy works
+    # regardless of which topology the cluster uses.
+    cat > "${tmp}" << EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-to-causa-backend
+  namespace: ${INSTALL_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: causa-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${OCP_MONITORING_NAMESPACE}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${OCP_UWM_NAMESPACE}
+      ports:
+        - protocol: TCP
+          port: 8080
+EOF
+
+    if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
+        rm -f "${tmp}"
+        log_error "Failed to apply NetworkPolicy for Alertmanager"
+        return 1
+    fi
+    rm -f "${tmp}"
+    write_to_log_file "SUCCESS" "NetworkPolicy applied"
+    return 0
+}
+
+################################################################################
+# enable_monitoring
+# Enables UWM, wires the Alertmanager webhook receiver, applies PrometheusRule
+# and NetworkPolicy.
+################################################################################
+enable_monitoring() {
     log_section_silent "Configuring OpenShift Monitoring"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
@@ -349,16 +420,26 @@ install_openshift_prometheus() {
         fi
     fi
 
+    # ── 3. Apply PrometheusRule ───────────────────────────────────────────────
+    if ! _ocp_apply_prometheus_rule; then
+        return 1
+    fi
+
+    # ── 4. Apply NetworkPolicy ────────────────────────────────────────────────
+    if ! _ocp_apply_network_policy; then
+        return 1
+    fi
+
     write_to_log_file "SUCCESS" "OpenShift monitoring configured"
     write_to_log_file "INFO"    "Alertmanager webhook → $(_ocp_causa_alertmanager_webhook_url)"
     return 0
 }
 
 ################################################################################
-# uninstall_openshift_prometheus
-# Removes the Alertmanager webhook config.
+# disable_monitoring
+# Removes the Alertmanager webhook config, PrometheusRule, and NetworkPolicy.
 ################################################################################
-uninstall_openshift_prometheus() {
+disable_monitoring() {
     log_section_silent "Removing OpenShift monitoring configuration"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
@@ -421,9 +502,26 @@ PYEOF
         fi
     fi
 
+    # Remove PrometheusRule
+    local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
+    local manifest="${prom_dir}/prometheusrule.yaml"
+    if [[ -f "${manifest}" ]]; then
+        local tmp; tmp=$(mktemp /tmp/causa-ocp-prom-rule-XXXXXX.yaml)
+        sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
+        ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+        rm -f "${tmp}"
+        write_to_log_file "INFO" "PrometheusRule removed (or was absent)"
+    fi
+
+    # Remove NetworkPolicy
+    ${KUBE_CLI} delete networkpolicy allow-alertmanager-to-causa-backend \
+        -n "${INSTALL_NAMESPACE}" \
+        --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+    write_to_log_file "INFO" "NetworkPolicy removed (or was absent)"
+
     write_to_log_file "SUCCESS" "OpenShift monitoring configuration removed"
     return 0
 }
 
-export -f install_openshift_prometheus
-export -f uninstall_openshift_prometheus
+export -f enable_monitoring
+export -f disable_monitoring

@@ -110,8 +110,19 @@ check_command_exists() {
     command -v "$1" &>/dev/null
 }
 
+# Label stamped on namespaces this installer creates.
+# Used by delete_namespace to distinguish installer-owned namespaces from
+# pre-existing ones — safe to delete only when this label is present.
+_NS_MANAGED_LABEL="app.kubernetes.io/managed-by=causa-installer"
+
 ################################################################################
-# Namespace creation (idempotent)
+# create_namespace (idempotent)
+#
+# kind target   : creates the namespace; waits out a Terminating state.
+# openshift target: creates the namespace; stamps the managed-by label so
+#                   delete_namespace can identify installer-owned namespaces.
+#                   Terminating is treated as a hard error on OpenShift
+#                   (manual intervention required).
 ################################################################################
 create_namespace() {
     local ns="${INSTALL_NAMESPACE}"
@@ -126,6 +137,10 @@ create_namespace() {
         local phase
         phase=$(${KUBE_CLI} get namespace "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null)
         if [[ "${phase}" == "Terminating" ]]; then
+            if _is_openshift_target; then
+                log_error "Namespace '${ns}' is in Terminating state — wait for deletion and retry"
+                return 1
+            fi
             log_warn "Namespace ${ns} is terminating — waiting up to 120s..."
             local waited=0
             while ${KUBE_CLI} get namespace "${ns}" &>/dev/null; do
@@ -133,20 +148,66 @@ create_namespace() {
                 sleep 5; waited=$((waited+5))
             done
         else
-            write_to_log_file "INFO" "Namespace ${ns} already exists"
+            write_to_log_file "INFO" "Namespace '${ns}' already exists"
             return 0
         fi
     fi
 
     if ! ${KUBE_CLI} create namespace "${ns}" >>"${LOG_FILE}" 2>&1; then
-        if ${KUBE_CLI} get namespace "${ns}" >>"${LOG_FILE}" 2>&1; then
-            write_to_log_file "INFO" "Namespace ${ns} already exists (AlreadyExists returned by create)"
+        if ${KUBE_CLI} get namespace "${ns}" &>/dev/null; then
+            write_to_log_file "INFO" "Namespace '${ns}' already exists (AlreadyExists race)"
             return 0
         fi
-        log_error "Failed to create namespace ${ns}"
+        log_error "Failed to create namespace '${ns}'"
         return 1
     fi
-    write_to_log_file "SUCCESS" "Namespace ${ns} created"
+
+    # Stamp managed-by label so delete_namespace can identify installer-owned namespaces
+    ${KUBE_CLI} label namespace "${ns}" \
+        ${_NS_MANAGED_LABEL} --overwrite \
+        >>"${LOG_FILE}" 2>&1 || true
+
+    write_to_log_file "SUCCESS" "Namespace '${ns}' created"
+    return 0
+}
+
+################################################################################
+# delete_namespace
+#
+# Deletes the install namespace only if the installer created it (managed-by
+# label present).  If the namespace was pre-existing, logs a hint and skips
+# deletion to avoid accidental data loss.
+# Works for both kind and openshift targets.
+################################################################################
+delete_namespace() {
+    local ns="${INSTALL_NAMESPACE}"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        write_to_log_file "INFO" "Dry run — skipping namespace deletion"
+        return 0
+    fi
+
+    if ! ${KUBE_CLI} get namespace "${ns}" &>/dev/null; then
+        write_to_log_file "INFO" "Namespace '${ns}' not found — nothing to delete"
+        return 0
+    fi
+
+    local managed_by
+    managed_by=$(${KUBE_CLI} get namespace "${ns}" \
+        -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || echo "")
+
+    if [[ "${managed_by}" != "causa-installer" ]]; then
+        write_to_log_file "INFO" "Namespace '${ns}' was not created by this installer — preserving it"
+        write_to_log_file "INFO" "To delete manually:  ${KUBE_CLI} delete namespace ${ns}"
+        return 0
+    fi
+
+    write_to_log_file "INFO" "Deleting installer-owned namespace '${ns}'..."
+    if ! ${KUBE_CLI} delete namespace "${ns}" >>"${LOG_FILE}" 2>&1; then
+        log_error "Failed to delete namespace '${ns}'"
+        return 1
+    fi
+    write_to_log_file "SUCCESS" "Namespace '${ns}' deleted"
     return 0
 }
 
@@ -268,6 +329,7 @@ export -f detect_arch
 export -f run_with_timeout
 export -f check_command_exists
 export -f create_namespace
+export -f delete_namespace
 export -f wait_for_deployment
 export -f calculate_elapsed_label
 export -f apply_manifest

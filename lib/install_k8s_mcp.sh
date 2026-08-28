@@ -36,12 +36,6 @@ install_kubernetes_mcp_server() {
         return 0
     fi
 
-    # On kind, create_namespace provisions the namespace; on OpenShift the
-    # namespace already exists (install_openshift_infra ran before this step).
-    if _is_kind_target; then
-        if ! create_namespace; then return 1; fi
-    fi
-
     local manifest; manifest=$(_k8s_mcp_manifest)
     local img="${K8S_MCP_SERVER_IMAGE}"
 
