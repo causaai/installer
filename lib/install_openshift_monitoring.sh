@@ -210,7 +210,6 @@ _ocp_configure_platform_alertmanager() {
     # Append the causa-webhook receiver to the receivers list and add a
     # child route that matches alerts from the install namespace.
     local tmp_cfg; tmp_cfg=$(mktemp /tmp/causa-ocp-am-config-XXXXXX.yaml)
-    local tmp_secret; tmp_secret=$(mktemp /tmp/causa-ocp-am-secret-XXXXXX.yaml)
 
     # Use Python with PyYAML to safely merge the YAML.
     # Both python3 and the yaml module are required; fail fast if either is absent.
@@ -264,19 +263,19 @@ PYEOF
         local py_rc=$?
         rm -f "${tmp_in}"
         if [[ ${py_rc} -ne 0 ]]; then
-            rm -f "${tmp_cfg}" "${tmp_secret}"
+            rm -f "${tmp_cfg}"
             log_error "Python YAML merge failed"
             return 1
         fi
     else
-        rm -f "${tmp_cfg}" "${tmp_secret}"
+        rm -f "${tmp_cfg}"
         log_error "python3 with PyYAML is required to merge Alertmanager config safely"
         log_error "Install PyYAML:  pip3 install pyyaml"
         return 1
     fi
 
     if [[ ! -s "${tmp_cfg}" ]]; then
-        rm -f "${tmp_cfg}" "${tmp_secret}"
+        rm -f "${tmp_cfg}"
         log_error "Failed to generate merged Alertmanager config"
         return 1
     fi
@@ -287,91 +286,22 @@ PYEOF
             -n "${ns}" \
             --dry-run=client -o yaml \
             | ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1; then
-        rm -f "${tmp_cfg}" "${tmp_secret}"
+        rm -f "${tmp_cfg}"
         log_error "Failed to patch platform Alertmanager Secret"
         return 1
     fi
 
-    rm -f "${tmp_cfg}" "${tmp_secret}"
+    rm -f "${tmp_cfg}"
     write_to_log_file "SUCCESS" "Platform Alertmanager patched with causa-webhook receiver"
     write_to_log_file "INFO"    "Webhook → ${webhook_url}"
     return 0
 }
 
 ################################################################################
-# _ocp_apply_prometheus_rule
-################################################################################
-_ocp_apply_prometheus_rule() {
-    local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
-    local manifest="${prom_dir}/prometheusrule.yaml"
-
-    if [[ ! -f "${manifest}" ]]; then
-        write_to_log_file "WARN" "PrometheusRule manifest not found: ${manifest} — skipping"
-        return 0
-    fi
-
-    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${INSTALL_NAMESPACE}"
-    local tmp; tmp=$(mktemp /tmp/causa-ocp-prom-rule-XXXXXX.yaml)
-    sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
-    if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
-        rm -f "${tmp}"
-        log_error "Failed to apply PrometheusRule"
-        return 1
-    fi
-    rm -f "${tmp}"
-    write_to_log_file "SUCCESS" "PrometheusRule applied to namespace: ${INSTALL_NAMESPACE}"
-    return 0
-}
-
-################################################################################
-# _ocp_apply_network_policy
-# Allows Alertmanager (platform or UWM namespace) to reach Causa Backend.
-################################################################################
-_ocp_apply_network_policy() {
-    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager → Causa Backend..."
-
-    local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
-
-    # Allow from both possible Alertmanager namespaces so the policy works
-    # regardless of which topology the cluster uses.
-    cat > "${tmp}" << EOF
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-alertmanager-to-causa-backend
-  namespace: ${INSTALL_NAMESPACE}
-spec:
-  podSelector:
-    matchLabels:
-      app: causa-backend
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ${OCP_MONITORING_NAMESPACE}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ${OCP_UWM_NAMESPACE}
-      ports:
-        - protocol: TCP
-          port: 8080
-EOF
-
-    if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
-        rm -f "${tmp}"
-        log_error "Failed to apply NetworkPolicy for Alertmanager"
-        return 1
-    fi
-    rm -f "${tmp}"
-    write_to_log_file "SUCCESS" "NetworkPolicy applied"
-    return 0
-}
-
-################################################################################
 # install_openshift_prometheus
-# Main entry point — auto-detects topology and configures accordingly.
+# Enables UWM and wires the Alertmanager webhook receiver.
+# PrometheusRule and NetworkPolicy (both require Causa Backend) are added in
+# feat/openshift-routes.
 ################################################################################
 install_openshift_prometheus() {
     log_section_silent "Configuring OpenShift Monitoring"
@@ -402,16 +332,6 @@ install_openshift_prometheus() {
         fi
     fi
 
-    # ── 4. Apply PrometheusRule ───────────────────────────────────────────────
-    if ! _ocp_apply_prometheus_rule; then
-        return 1
-    fi
-
-    # ── 5. Apply NetworkPolicy ────────────────────────────────────────────────
-    if ! _ocp_apply_network_policy; then
-        return 1
-    fi
-
     write_to_log_file "SUCCESS" "OpenShift monitoring configured"
     write_to_log_file "INFO"    "Alertmanager webhook → $(_ocp_causa_alertmanager_webhook_url)"
     return 0
@@ -419,7 +339,7 @@ install_openshift_prometheus() {
 
 ################################################################################
 # uninstall_openshift_prometheus
-# Removes the webhook config, PrometheusRule, and NetworkPolicy.
+# Removes the Alertmanager webhook config.
 ################################################################################
 uninstall_openshift_prometheus() {
     log_section_silent "Removing OpenShift monitoring configuration"
@@ -483,23 +403,6 @@ PYEOF
             fi
         fi
     fi
-
-    # Remove PrometheusRule
-    local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
-    local manifest="${prom_dir}/prometheusrule.yaml"
-    if [[ -f "${manifest}" ]]; then
-        local tmp; tmp=$(mktemp /tmp/causa-ocp-prom-rule-XXXXXX.yaml)
-        sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
-        ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
-        rm -f "${tmp}"
-        write_to_log_file "INFO" "PrometheusRule removed (or was absent)"
-    fi
-
-    # Remove NetworkPolicy
-    ${KUBE_CLI} delete networkpolicy allow-alertmanager-to-causa-backend \
-        -n "${INSTALL_NAMESPACE}" \
-        --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
-    write_to_log_file "INFO" "NetworkPolicy removed (or was absent)"
 
     write_to_log_file "SUCCESS" "OpenShift monitoring configuration removed"
     return 0

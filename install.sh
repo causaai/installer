@@ -298,12 +298,12 @@ main() {
     log_install_success "Kubernetes MCP Server"
     installed_components+=("Kubernetes MCP Server")
 
-    # ── Step 4: Jafra Ecosystem (Controller) — kind target only ──────────────
-    # TODO(feat/openshift-jafra): Remove this kind-only guard once feat/openshift-jafra
-    # is merged. That PR adds the OCP-specific DaemonSet manifest and SCC grant
-    # needed to run the Jafra agent on OpenShift. Until then, Jafra is skipped
-    # on the OpenShift target to avoid a failed DaemonSet rollout.
+    # Steps 4-9 are kind-only — OpenShift support for each lands in its own PR:
+    #   Jafra Ecosystem + Jafra MCP  → feat/openshift-jafra
+    #   Quarkus MCP + PostgreSQL     → feat/openshift-postgres
+    #   Causa Backend + Causa MCP    → feat/openshift-routes
     if _is_kind_target; then
+        # ── Step 4: Jafra Ecosystem (Controller) ─────────────────────────────
         start_spinner "Installing Jafra Ecosystem..."
         if ! install_jafra; then
             stop_spinner
@@ -314,7 +314,7 @@ main() {
             installed_components+=("Jafra Ecosystem")
         fi
 
-        # ── Step 5: Jafra MCP Server ─────────────────────────────────────────
+        # ── Step 5: Jafra MCP Server ──────────────────────────────────────────
         start_spinner "Installing Jafra MCP Server..."
         if ! install_jafra_mcp; then
             stop_spinner
@@ -324,29 +324,19 @@ main() {
             log_install_success "Jafra MCP Server"
             installed_components+=("Jafra MCP Server")
         fi
-    else
-        # TODO(feat/openshift-jafra): Remove this skip block when that PR is merged.
-        write_to_log_file "INFO" "Skipping Jafra Ecosystem + Jafra MCP on OpenShift target (pending feat/openshift-jafra)"
-    fi
 
-    # ── Step 6: Quarkus MCP Server ───────────────────────────────────────────
-    start_spinner "Installing Quarkus MCP Server..."
-    if ! install_quarkus_mcp; then
-        stop_spinner
-        log_warn "Quarkus MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Quarkus MCP Server"
-        installed_components+=("Quarkus MCP Server")
-    fi
+        # ── Step 6: Quarkus MCP Server ────────────────────────────────────────
+        start_spinner "Installing Quarkus MCP Server..."
+        if ! install_quarkus_mcp; then
+            stop_spinner
+            log_warn "Quarkus MCP Server installation skipped or failed"
+        else
+            stop_spinner
+            log_install_success "Quarkus MCP Server"
+            installed_components+=("Quarkus MCP Server")
+        fi
 
-    # ── Step 7: PostgreSQL — kind target only ────────────────────────────────
-    # TODO(feat/openshift-postgres): Remove this kind-only guard once feat/openshift-postgres
-    # is merged. That PR adds the CloudNativePG operator path (OLM Subscription +
-    # CNPG Cluster CRD) for the OpenShift target. Until then, PostgreSQL is
-    # skipped on OpenShift to avoid attempting a Deployment-based install that
-    # does not work on OCP.
-    if _is_kind_target; then
+        # ── Step 7: PostgreSQL ────────────────────────────────────────────────
         start_spinner "Installing PostgreSQL..."
         if ! install_postgres; then
             stop_spinner
@@ -356,31 +346,28 @@ main() {
         stop_spinner
         log_install_success "PostgreSQL"
         installed_components+=("PostgreSQL")
-    else
-        # TODO(feat/openshift-postgres): Remove this skip block when that PR is merged.
-        write_to_log_file "INFO" "Skipping PostgreSQL on OpenShift target (pending feat/openshift-postgres)"
-    fi
 
-    # ── Step 8: Causa Backend ────────────────────────────────────────────────
-    start_spinner "Installing Causa Backend..."
-    if ! install_causa; then
+        # ── Step 8: Causa Backend ─────────────────────────────────────────────
+        start_spinner "Installing Causa Backend..."
+        if ! install_causa; then
+            stop_spinner
+            log_error "Failed to install Causa Backend"
+            exit 1
+        fi
         stop_spinner
-        log_error "Failed to install Causa Backend"
-        exit 1
-    fi
-    stop_spinner
-    log_install_success "Causa Backend"
-    installed_components+=("Causa Backend")
+        log_install_success "Causa Backend"
+        installed_components+=("Causa Backend")
 
-    # ── Step 9: Causa MCP Server ─────────────────────────────────────────────
-    start_spinner "Installing Causa MCP Server..."
-    if ! install_causa_mcp; then
-        stop_spinner
-        log_warn "Causa MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Causa MCP Server"
-        installed_components+=("Causa MCP Server")
+        # ── Step 9: Causa MCP Server ──────────────────────────────────────────
+        start_spinner "Installing Causa MCP Server..."
+        if ! install_causa_mcp; then
+            stop_spinner
+            log_warn "Causa MCP Server installation skipped or failed"
+        else
+            stop_spinner
+            log_install_success "Causa MCP Server"
+            installed_components+=("Causa MCP Server")
+        fi
     fi
 
     # ── Post-install summary ─────────────────────────────────────────────────
@@ -432,16 +419,15 @@ uninstall_main() {
         export CONTAINER_RUNTIME
     fi
 
-    start_spinner "Uninstalling Causa MCP Server..."
-    uninstall_causa_mcp
-    stop_spinner; log_uninstall_success "Causa MCP Server"
-
-    start_spinner "Uninstalling Quarkus MCP Server..."
-    uninstall_quarkus_mcp
-    stop_spinner; log_uninstall_success "Quarkus MCP Server"
-
-    # TODO(feat/openshift-jafra): Remove kind-only guard when that PR is merged.
     if _is_kind_target; then
+        start_spinner "Uninstalling Causa MCP Server..."
+        uninstall_causa_mcp
+        stop_spinner; log_uninstall_success "Causa MCP Server"
+
+        start_spinner "Uninstalling Quarkus MCP Server..."
+        uninstall_quarkus_mcp
+        stop_spinner; log_uninstall_success "Quarkus MCP Server"
+
         start_spinner "Uninstalling Jafra MCP Server..."
         uninstall_jafra_mcp
         stop_spinner; log_uninstall_success "Jafra MCP Server"
@@ -449,22 +435,17 @@ uninstall_main() {
         start_spinner "Uninstalling Jafra Ecosystem..."
         uninstall_jafra
         stop_spinner; log_uninstall_success "Jafra Ecosystem"
-    fi
 
-    if _is_kind_target; then
         start_spinner "Uninstalling cert-manager..."
         uninstall_cert_manager
         stop_spinner; log_uninstall_success "cert-manager"
-    fi
 
-    start_spinner "Uninstalling Causa Backend..."
-    if ! uninstall_causa; then
-        stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
-    fi
-    stop_spinner; log_uninstall_success "Causa Backend"
+        start_spinner "Uninstalling Causa Backend..."
+        if ! uninstall_causa; then
+            stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
+        fi
+        stop_spinner; log_uninstall_success "Causa Backend"
 
-    # TODO(feat/openshift-postgres): Remove kind-only guard when that PR is merged.
-    if _is_kind_target; then
         start_spinner "Uninstalling PostgreSQL..."
         uninstall_postgres
         stop_spinner; log_uninstall_success "PostgreSQL"
