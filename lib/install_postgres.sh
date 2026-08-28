@@ -54,7 +54,7 @@ _cnpg_operator_ready() {
     ${KUBE_CLI} get csv -n "${ns}" 2>/dev/null \
         | grep "${_CNPG_OPERATOR_NAME}" | grep -q "Succeeded" || return 1
     ${KUBE_CLI} rollout status deployment/cnpg-controller-manager \
-        -n "${ns}" --timeout=120s &>/dev/null
+        -n "${ns}" --timeout=120s &>/dev/null || return 1
 }
 
 ################################################################################
@@ -222,11 +222,16 @@ _cnpg_create_causa_db_secrets() {
         sleep 2
     done
 
+    # base64 decode: GNU coreutils uses -d / --decode; macOS BSD uses -D.
+    # Capture raw b64 first, then decode portably in a single pass.
+    local _b64_decode="base64 --decode"
+    base64 --decode </dev/null &>/dev/null || _b64_decode="base64 -D"
+
     local db_user db_pass
     db_user=$(${KUBE_CLI} get secret "${cnpg_secret}" -n "${ns}" \
-        -o jsonpath='{.data.username}' 2>/dev/null | base64 -d)
+        -o jsonpath='{.data.username}' 2>/dev/null | ${_b64_decode})
     db_pass=$(${KUBE_CLI} get secret "${cnpg_secret}" -n "${ns}" \
-        -o jsonpath='{.data.password}' 2>/dev/null | base64 -d)
+        -o jsonpath='{.data.password}' 2>/dev/null | ${_b64_decode})
 
     if [[ -z "${db_user}" || -z "${db_pass}" ]]; then
         log_error "Failed to extract credentials from CNPG secret ${cnpg_secret}"

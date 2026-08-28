@@ -350,7 +350,6 @@ main() {
         fi
         stop_spinner
         log_install_success "Monitoring and Prometheus Alerts"
-        installed_components+=("Monitoring and Prometheus Alerts")
     fi
 
     # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
@@ -363,7 +362,6 @@ main() {
         fi
         stop_spinner
         log_install_success "Prometheus Stack (kube-prometheus-stack)"
-        installed_components+=("Prometheus Stack")
     fi
 
     # ── Step 3: cert-manager (kind target only, required by Jafra) ───────────
@@ -491,6 +489,20 @@ uninstall_main() {
 
     # Uninstall OpenShift components (openshift target only)
     if _is_openshift_target; then
+        start_spinner "Uninstalling Causa MCP Server..."
+        uninstall_causa_mcp
+        stop_spinner; log_uninstall_success "Causa MCP Server"
+
+        start_spinner "Uninstalling Causa Backend..."
+        if ! uninstall_causa; then
+            stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
+        fi
+        stop_spinner; log_uninstall_success "Causa Backend"
+
+        start_spinner "Uninstalling PostgreSQL..."
+        uninstall_postgres
+        stop_spinner; log_uninstall_success "PostgreSQL"
+
         start_spinner "Disabling monitoring and Prometheus alerts..."
         disable_monitoring
         stop_spinner; log_uninstall_success "Monitoring and Prometheus Alerts"
