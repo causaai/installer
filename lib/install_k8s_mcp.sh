@@ -36,7 +36,11 @@ install_kubernetes_mcp_server() {
         return 0
     fi
 
-    if ! create_namespace; then return 1; fi
+    # On kind, create_namespace provisions the namespace; on OpenShift the
+    # namespace already exists (install_openshift_infra ran before this step).
+    if _is_kind_target; then
+        if ! create_namespace; then return 1; fi
+    fi
 
     local manifest; manifest=$(_k8s_mcp_manifest)
     local img="${K8S_MCP_SERVER_IMAGE}"
@@ -55,10 +59,19 @@ install_kubernetes_mcp_server() {
         return 1
     fi
 
+    # On OpenShift, also apply the Route so the MCP server is externally reachable.
+    if _is_openshift_target; then
+        local route_manifest="${SCRIPT_DIR}/manifests/openshift/kubernetes-mcp-server-route.yaml"
+        if ! apply_manifest "${route_manifest}" "${INSTALL_NAMESPACE}"; then
+            log_error "Failed to apply Kubernetes MCP Server Route"
+            return 1
+        fi
+        write_to_log_file "INFO" "OpenShift Route applied — access via https://<cluster-ingress>/mcp"
+    else
+        write_to_log_file "INFO" "NodePort: http://localhost:30000/mcp"
+    fi
+
     write_to_log_file "SUCCESS" "Kubernetes MCP Server installed"
-
-    write_to_log_file "INFO" "NodePort: http://localhost:30000/mcp"
-
     return 0
 }
 

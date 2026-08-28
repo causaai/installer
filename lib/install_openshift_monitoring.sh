@@ -18,12 +18,10 @@
 #
 # This script auto-detects which topology is present and acts accordingly.
 #
-# In both cases this script:
+# This script:
 #   1. Enables User Workload Monitoring (if not already on)
 #   2. Configures the correct Alertmanager with a webhook receiver pointing to:
 #        http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/alerts
-#   3. Applies a PrometheusRule (same alert rules used on Kind)
-#   4. Applies a NetworkPolicy (allows Alertmanager → Causa Backend on port 8080)
 #
 # References:
 #   https://docs.openshift.com/container-platform/latest/monitoring/enabling-monitoring-for-user-defined-projects.html
@@ -43,7 +41,8 @@ OCP_MONITORING_NAMESPACE="${OCP_MONITORING_NAMESPACE:-openshift-monitoring}"
 OCP_UWM_ALERTMANAGER_SECRET="${OCP_UWM_ALERTMANAGER_SECRET:-alertmanager-user-workload}"
 OCP_PLATFORM_ALERTMANAGER_SECRET="${OCP_PLATFORM_ALERTMANAGER_SECRET:-alertmanager-main}"
 
-export OCP_UWM_NAMESPACE OCP_MONITORING_NAMESPACE
+export OCP_UWM_NAMESPACE OCP_MONITORING_NAMESPACE \
+       OCP_UWM_ALERTMANAGER_SECRET OCP_PLATFORM_ALERTMANAGER_SECRET
 
 ################################################################################
 # _ocp_causa_alertmanager_webhook_url
@@ -54,7 +53,7 @@ _ocp_causa_alertmanager_webhook_url() {
 
 ################################################################################
 # _ocp_uwm_alertmanager_present
-# Returns 0 if the UWM-specific Alertmanager StatefulSet exists and is ready.
+# Returns 0 if the UWM-specific Alertmanager StatefulSet exists.
 ################################################################################
 _ocp_uwm_alertmanager_present() {
     ${KUBE_CLI} get statefulset alertmanager-user-workload \
@@ -317,8 +316,6 @@ PYEOF
 ################################################################################
 # install_openshift_prometheus
 # Enables UWM and wires the Alertmanager webhook receiver.
-# PrometheusRule and NetworkPolicy (both require Causa Backend) are added in
-# feat/openshift-routes.
 ################################################################################
 install_openshift_prometheus() {
     log_section_silent "Configuring OpenShift Monitoring"
