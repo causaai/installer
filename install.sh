@@ -112,7 +112,6 @@ source "${SCRIPT_DIR}/lib/install_utils.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/install_prometheus.sh"
-source "${SCRIPT_DIR}/lib/install_openshift_infra.sh"
 source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
@@ -342,29 +341,17 @@ main() {
         fi
     fi
 
-    # ── Steps 2a+2b: OpenShift namespace setup + monitoring (openshift only) ─
-    # 2b depends on 2a (namespace must exist before Alertmanager config runs),
-    # so both steps are kept inside one _is_openshift_target guard.
+    # ── Step 2: Enable monitoring + Prometheus alerts ────────
     if _is_openshift_target; then
-        start_spinner "Setting up OpenShift namespace..."
-        if ! install_openshift_infra; then
-            stop_spinner
-            log_error "Failed to set up OpenShift namespace"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "OpenShift Namespace (${INSTALL_NAMESPACE})"
-        installed_components+=("OpenShift Namespace")
-
-        start_spinner "Configuring OpenShift User Workload Monitoring..."
+        start_spinner "Enabling monitoring and Prometheus alerts..."
         if ! enable_monitoring; then
             stop_spinner
-            log_error "Failed to configure OpenShift monitoring"
+            log_error "Failed to enable monitoring"
             exit 1
         fi
         stop_spinner
-        log_install_success "OpenShift Monitoring (UWM Alertmanager webhook)"
-        installed_components+=("OpenShift Monitoring")
+        log_install_success "Monitoring and Prometheus Alerts"
+        installed_components+=("Monitoring and Prometheus Alerts")
     fi
 
     # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
@@ -474,15 +461,15 @@ uninstall_main() {
         stop_spinner; log_uninstall_success "Prometheus Stack"
     fi
 
-    # Uninstall OpenShift monitoring config (openshift target only)
+    # Uninstall OpenShift components (openshift target only)
     if _is_openshift_target; then
-        start_spinner "Removing OpenShift monitoring configuration..."
+        start_spinner "Disabling monitoring and Prometheus alerts..."
         disable_monitoring
-        stop_spinner; log_uninstall_success "OpenShift Monitoring"
+        stop_spinner; log_uninstall_success "Monitoring and Prometheus Alerts"
 
-        start_spinner "Removing OpenShift namespace setup..."
-        uninstall_openshift_infra
-        stop_spinner; log_uninstall_success "OpenShift Namespace"
+        start_spinner "Removing namespace..."
+        delete_namespace
+        stop_spinner; log_uninstall_success "Namespace (${INSTALL_NAMESPACE})"
     fi
 
     # Optionally delete the Kind cluster entirely

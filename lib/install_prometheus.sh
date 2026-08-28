@@ -239,13 +239,8 @@ install_prometheus() {
     write_to_log_file "SUCCESS" "PrometheusRule CRD is registered"
 
     # ── 6. Ensure target namespace exists before applying PrometheusRule ──────
-    if ! ${KUBE_CLI} get namespace "${INSTALL_NAMESPACE}" &>/dev/null; then
-        write_to_log_file "INFO" "Creating namespace: ${INSTALL_NAMESPACE}"
-        ${KUBE_CLI} create namespace "${INSTALL_NAMESPACE}" \
-            >>"${LOG_FILE}" 2>&1 || true
-        write_to_log_file "SUCCESS" "Namespace created: ${INSTALL_NAMESPACE}"
-    else
-        write_to_log_file "INFO" "Namespace already exists: ${INSTALL_NAMESPACE}"
+    if ! create_namespace; then
+        return 1
     fi
 
     # ── 7. Apply PrometheusRule and NetworkPolicy ─────────────────────────────
