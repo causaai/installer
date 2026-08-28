@@ -258,8 +258,6 @@ install_postgres() {
         return 0
     fi
 
-    if ! create_namespace; then return 1; fi
-
     # ── OpenShift: CloudNativePG operator path ────────────────────────────────
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local ns="${INSTALL_NAMESPACE}"

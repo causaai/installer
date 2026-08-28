@@ -54,8 +54,10 @@ KUBE_CLI="${KUBE_CLI:-kubectl}"
 export KUBE_CLI
 
 # Target platform — determines which infrastructure steps run.
-# Supported values: kind
-# kind  → creates a Kind cluster + local registry + installs Prometheus stack
+# Supported values: kind | openshift
+#   kind       → creates a Kind cluster + local registry + installs Prometheus stack
+#   openshift  → connects to an existing OpenShift cluster; uses built-in UWM
+#                (no cluster creation, no Prometheus install, no cert-manager install)
 INSTALL_TARGET="${INSTALL_TARGET:-kind}"
 export INSTALL_TARGET
 
@@ -79,9 +81,12 @@ CAUSA_MCP_IMAGE="${CAUSA_MCP_IMAGE:-}"
 JAFRA_CONTROLLER_IMAGE="${JAFRA_CONTROLLER_IMAGE:-}"
 JAFRA_ANALYZER_IMAGE="${JAFRA_ANALYZER_IMAGE:-}"
 JAFRA_AGENT_IMAGE="${JAFRA_AGENT_IMAGE:-}"
+POSTGRES_KIND_IMAGE="${POSTGRES_KIND_IMAGE:-}"
+POSTGRES_OCP_IMAGE="${POSTGRES_OCP_IMAGE:-}"
 export K8S_MCP_SERVER_IMAGE CAUSA_BACKEND_IMAGE
 export JAFRA_MCP_IMAGE QUARKUS_MCP_IMAGE CAUSA_MCP_IMAGE
 export JAFRA_CONTROLLER_IMAGE JAFRA_ANALYZER_IMAGE JAFRA_AGENT_IMAGE
+export POSTGRES_KIND_IMAGE POSTGRES_OCP_IMAGE
 
 # Sentinel flags — set to "true" only when a CLI flag explicitly overrides an image
 K8S_MCP_SERVER_IMAGE_OVERRIDDEN=false
@@ -92,9 +97,12 @@ CAUSA_MCP_IMAGE_OVERRIDDEN=false
 JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=false
 JAFRA_ANALYZER_IMAGE_OVERRIDDEN=false
 JAFRA_AGENT_IMAGE_OVERRIDDEN=false
+POSTGRES_KIND_IMAGE_OVERRIDDEN=false
+POSTGRES_OCP_IMAGE_OVERRIDDEN=false
 export K8S_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_BACKEND_IMAGE_OVERRIDDEN
 export JAFRA_MCP_IMAGE_OVERRIDDEN QUARKUS_MCP_IMAGE_OVERRIDDEN CAUSA_MCP_IMAGE_OVERRIDDEN
 export JAFRA_CONTROLLER_IMAGE_OVERRIDDEN JAFRA_ANALYZER_IMAGE_OVERRIDDEN JAFRA_AGENT_IMAGE_OVERRIDDEN
+export POSTGRES_KIND_IMAGE_OVERRIDDEN POSTGRES_OCP_IMAGE_OVERRIDDEN
 
 # ---------------------------------------------------------------------------
 # Source library files
@@ -389,14 +397,14 @@ main() {
 
     # ── Steps 7-9: PostgreSQL + Causa Backend + Causa MCP (openshift target) ─
     if _is_openshift_target; then
-        start_spinner "Installing PostgreSQL (CloudNativePG)..."
+        start_spinner "Installing PostgreSQL..."
         if ! install_postgres; then
             stop_spinner
             log_error "Failed to install PostgreSQL"
             exit 1
         fi
         stop_spinner
-        log_install_success "PostgreSQL (CloudNativePG)"
+        log_install_success "PostgreSQL"
         installed_components+=("PostgreSQL")
 
         start_spinner "Installing Causa Backend..."
@@ -526,14 +534,42 @@ uninstall_main() {
 # _print_access_summary
 ################################################################################
 _print_access_summary() {
+    local backend_url mcp_url
+
+    if _is_openshift_target; then
+        # Fetch the hostnames assigned by the OpenShift ingress controller.
+        local backend_host mcp_host
+        backend_host=$(${KUBE_CLI} get route causa-backend \
+            -n "${INSTALL_NAMESPACE}" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+        mcp_host=$(${KUBE_CLI} get route causa-mcp \
+            -n "${INSTALL_NAMESPACE}" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+
+        if [[ -n "${backend_host}" ]]; then
+            backend_url="https://${backend_host}/api/v1/diagnostics"
+        else
+            backend_url="(route host not yet available — run: ${KUBE_CLI} get route causa-backend -n ${INSTALL_NAMESPACE})"
+        fi
+
+        if [[ -n "${mcp_host}" ]]; then
+            mcp_url="https://${mcp_host}/mcp"
+        else
+            mcp_url="(route host not yet available — run: ${KUBE_CLI} get route causa-mcp -n ${INSTALL_NAMESPACE})"
+        fi
+    else
+        backend_url="http://localhost:30001/api/v1/diagnostics"
+        mcp_url="http://localhost:30005/mcp"
+    fi
+
     {
         echo ""
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo ""
-        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  http://localhost:30001/api/v1/diagnostics"
-        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  http://localhost:30005/mcp"
+        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  ${backend_url}"
+        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  ${mcp_url}"
         echo ""
         if [[ -n "${LOG_FILE:-}" ]]; then
             echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
@@ -551,8 +587,9 @@ show_usage() {
     echo "Install or uninstall the Causa RCA stack."
     echo ""
     echo "OPTIONS:"
-    echo "    --target TARGET               Target platform: kind (default: kind)"
-    echo "                                  kind  — provisions a local Kind cluster"
+    echo "    --target TARGET               Target platform (default: kind)"
+    echo "                                    kind       — provisions a local Kind cluster"
+    echo "                                    openshift  — deploys into an existing OpenShift cluster"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
     echo "    --delete-cluster              Also delete the Kind cluster when terminating"
@@ -613,9 +650,9 @@ parse_arguments() {
             --target)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --target"; show_usage; exit 2; }
                 case "$2" in
-                    kind) INSTALL_TARGET="$2" ;;
+                    kind|openshift) INSTALL_TARGET="$2" ;;
                     *)
-                        log_error "Unsupported target '${2}'. Currently supported: kind"
+                        log_error "Unsupported target '${2}'. Supported values: kind, openshift"
                         exit 2 ;;
                 esac
                 shift 2 ;;
@@ -658,6 +695,12 @@ parse_arguments() {
             --jafra-agent-image)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-agent-image"; show_usage; exit 2; }
                 JAFRA_AGENT_IMAGE="$2"; JAFRA_AGENT_IMAGE_OVERRIDDEN=true; shift 2 ;;
+            --postgres-kind-image)
+                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-kind-image"; show_usage; exit 2; }
+                POSTGRES_KIND_IMAGE="$2"; POSTGRES_KIND_IMAGE_OVERRIDDEN=true; shift 2 ;;
+            --postgres-ocp-image)
+                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-ocp-image"; show_usage; exit 2; }
+                POSTGRES_OCP_IMAGE="$2"; POSTGRES_OCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
             -h|--help)
                 show_usage; exit 0 ;;
             *)
