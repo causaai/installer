@@ -24,10 +24,13 @@ readonly _PG_DB_NAME="iri-db"
 readonly _PG_MANIFEST="${SCRIPT_DIR}/manifests/postgres/deployment.yaml"
 readonly _PG_USER="causa_backend"
 readonly _PG_PASS="causa_backend_pass"
-readonly _PG_KIND_IMAGE="${POSTGRES_KIND_IMAGE:-docker.io/pgvector/pgvector:pg17}"
+# Image defaults — resolved at call time inside install_postgres so that
+# CLI overrides (--postgres-kind-image / --postgres-ocp-image) take effect.
+readonly _PG_KIND_IMAGE_DEFAULT="docker.io/pgvector/pgvector:pg17"
 
 # ── OpenShift / CNPG constants ─────────────────────────────────────────────────
-readonly _PG_OCP_IMAGE="${POSTGRES_OCP_IMAGE:-quay.io/causa-ai-hub/postgres-pgvector:17}"
+# Image default — resolved at call time (see _cnpg_create_db_cluster).
+readonly _PG_OCP_IMAGE_DEFAULT="quay.io/causa-ai-hub/postgres-pgvector:17"
 
 readonly _CNPG_OPERATOR_NAME="cloudnative-pg"
 readonly _CNPG_OPERATOR_GROUP_YAML="${SCRIPT_DIR}/manifests/postgres/operator/operator_group.yaml"
@@ -154,28 +157,38 @@ _cnpg_db_cluster_ready() {
 ################################################################################
 _cnpg_create_db_cluster() {
     local ns="$1"
+    local pg_image="${POSTGRES_OCP_IMAGE:-${_PG_OCP_IMAGE_DEFAULT}}"
 
     if ${KUBE_CLI} get cluster.postgresql.cnpg.io "${_CNPG_DB_CLUSTER_NAME}" \
             -n "${ns}" &>/dev/null; then
         if _cnpg_db_cluster_ready "${ns}"; then
-            write_to_log_file "INFO" "CNPG cluster already healthy — skipping recreate"
+            write_to_log_file "INFO" "CNPG cluster already healthy — skipping"
             return 0
         fi
-        write_to_log_file "INFO" "CNPG cluster exists but is not healthy — recreating..."
-        ${KUBE_CLI} delete cluster.postgresql.cnpg.io "${_CNPG_DB_CLUSTER_NAME}" \
-            -n "${ns}" >>"${LOG_FILE}" 2>&1
+        # Cluster exists but is not yet healthy — could be starting, recovering,
+        # or failing over. Wait up to 10 minutes before giving up to avoid
+        # destroying data due to a transient state.
+        write_to_log_file "INFO" "CNPG cluster exists but is not healthy — waiting up to 10 minutes..."
         local wait
-        for wait in $(seq 1 60); do
-            ${KUBE_CLI} get cluster.postgresql.cnpg.io "${_CNPG_DB_CLUSTER_NAME}" \
-                -n "${ns}" &>/dev/null || break
-            [[ ${wait} -eq 60 ]] && write_to_log_file "WARN" "Timeout waiting for cluster deletion — continuing"
-            sleep 2
+        for wait in $(seq 1 120); do
+            if _cnpg_db_cluster_ready "${ns}"; then
+                write_to_log_file "SUCCESS" "CNPG cluster recovered and is healthy"
+                return 0
+            fi
+            if [[ $((wait % 12)) -eq 0 ]]; then
+                local phase
+                phase=$(${KUBE_CLI} get cluster.postgresql.cnpg.io "${_CNPG_DB_CLUSTER_NAME}" \
+                    -n "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+                write_to_log_file "INFO" "CNPG cluster phase: ${phase} (${wait}/120)"
+            fi
+            [[ ${wait} -eq 120 ]] && { log_error "Timeout waiting for existing CNPG cluster to become healthy"; return 1; }
+            sleep 5
         done
     fi
 
-    write_to_log_file "INFO" "Applying CNPG Cluster manifest (image: ${_PG_OCP_IMAGE})..."
+    write_to_log_file "INFO" "Applying CNPG Cluster manifest (image: ${pg_image})..."
     local tmp_cluster; tmp_cluster=$(mktemp /tmp/causa-cnpg-cluster-XXXXXX.yaml)
-    sed "s|PLACEHOLDER_OCP_POSTGRES_IMAGE|${_PG_OCP_IMAGE}|g" \
+    sed "s|PLACEHOLDER_OCP_POSTGRES_IMAGE|${pg_image}|g" \
         "${_CNPG_DB_CLUSTER_YAML}" > "${tmp_cluster}"
     # Namespace injected via -n flag; manifest has no namespace field
     if ! ${KUBE_CLI} apply -f "${tmp_cluster}" -n "${ns}" >>"${LOG_FILE}" 2>&1; then
@@ -307,7 +320,7 @@ install_postgres() {
     fi
 
     # ── kind: standalone Deployment path ─────────────────────────────────────
-    local pg_image="${_PG_KIND_IMAGE}"
+    local pg_image="${POSTGRES_KIND_IMAGE:-${_PG_KIND_IMAGE_DEFAULT}}"
     write_to_log_file "INFO" "Using image: ${pg_image}"
 
     write_to_log_file "INFO" "Creating postgres-credentials secret..."
