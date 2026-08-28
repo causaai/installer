@@ -390,14 +390,15 @@ install_kind_cluster() {
         fi
         rm -f "${kind_config}"
         write_to_log_file "SUCCESS" "Kind cluster '${KIND_CLUSTER_NAME}' created"
+    fi
 
-        # Check inotify sysctls AFTER the cluster node container exists.
-        # On macOS the check exec's into the kind node VM — the container must
-        # already be running.  On Linux it reads /proc/sys on the host, so the
-        # timing doesn't matter, but keeping it here is consistent and correct.
-        if ! _tune_kind_node_sysctls; then
-            exit 1
-        fi
+    # Check inotify sysctls after the cluster node container is confirmed running —
+    # both for newly created and pre-existing clusters.  On macOS the check
+    # exec's into the kind node; on Linux it reads /proc/sys on the host.
+    # Runs unconditionally so re-running the installer against an existing cluster
+    # still catches host or VM limits that were lowered since the last install.
+    if ! _tune_kind_node_sysctls; then
+        exit 1
     fi
 
     ${KUBE_CLI} config use-context "kind-${KIND_CLUSTER_NAME}" >>"${LOG_FILE}" 2>&1 || true
