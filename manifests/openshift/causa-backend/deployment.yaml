@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: causa-backend
+  namespace: PLACEHOLDER_NAMESPACE
+  labels:
+    app: causa-backend
+    app.kubernetes.io/name: causa-backend
+    app.kubernetes.io/component: rca-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: causa-backend
+  template:
+    metadata:
+      labels:
+        app: causa-backend
+        app.kubernetes.io/name: causa-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/q/metrics"
+    spec:
+      serviceAccountName: causa-backend
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: causa-backend
+          image: quay.io/causaai/causa-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+          env:
+            - name: APP_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          envFrom:
+            - configMapRef:
+                name: causa-config
+            - secretRef:
+                name: causa-llm-secrets
+                optional: true
+            - secretRef:
+                name: causa-db-secrets
+                optional: false
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 5

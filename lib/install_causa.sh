@@ -31,15 +31,16 @@ install_causa() {
     write_to_log_file "INFO" "Using image: ${img}"
 
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        # ── OpenShift path ────────────────────────────────────────────────────
-        # Apply the combined OpenShift manifest (ConfigMap + ServiceAccount +
-        # Deployment with OCP security context + ClusterIP Service).
-        local ocp_manifest="${SCRIPT_DIR}/manifests/openshift/causa-backend-manifests.yaml"
-        if ! apply_manifest "${ocp_manifest}" "${INSTALL_NAMESPACE}" \
+        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa-backend"
+
+        apply_manifest "${ocp_dir}/serviceaccount.yaml" "${INSTALL_NAMESPACE}" || return 1
+        apply_manifest "${ocp_dir}/configmap.yaml"      "${INSTALL_NAMESPACE}" || return 1
+        if ! apply_manifest "${ocp_dir}/deployment.yaml" "${INSTALL_NAMESPACE}" \
             "image: .*causa-backend.*" "${img}"; then
-            log_error "Failed to apply Causa Backend OpenShift manifests"
+            log_error "Failed to apply Causa Backend deployment"
             return 1
         fi
+        apply_manifest "${ocp_dir}/service.yaml" "${INSTALL_NAMESPACE}" || return 1
 
         if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" 600; then
             log_error "Causa Backend did not become ready in time"
@@ -49,8 +50,7 @@ install_causa() {
         write_to_log_file "SUCCESS" "Causa Backend installed"
         write_to_log_file "INFO"    "Internal URL: http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080"
 
-        local route="${SCRIPT_DIR}/manifests/openshift/causa-backend-route.yaml"
-        if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
+        if ! apply_manifest "${ocp_dir}/route.yaml" "${INSTALL_NAMESPACE}"; then
             log_error "Failed to apply Causa Backend Route"
             return 1
         fi
@@ -89,11 +89,13 @@ uninstall_causa() {
     fi
 
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        # ── OpenShift path ────────────────────────────────────────────────────
-        delete_manifest "${SCRIPT_DIR}/manifests/openshift/causa-backend-manifests.yaml" "${INSTALL_NAMESPACE}"
-        delete_manifest "${SCRIPT_DIR}/manifests/openshift/causa-backend-route.yaml" "${INSTALL_NAMESPACE}"
+        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa-backend"
+        delete_manifest "${ocp_dir}/route.yaml"          "${INSTALL_NAMESPACE}"
+        delete_manifest "${ocp_dir}/deployment.yaml"     "${INSTALL_NAMESPACE}"
+        delete_manifest "${ocp_dir}/service.yaml"        "${INSTALL_NAMESPACE}"
+        delete_manifest "${ocp_dir}/configmap.yaml"      "${INSTALL_NAMESPACE}"
+        delete_manifest "${ocp_dir}/serviceaccount.yaml" "${INSTALL_NAMESPACE}"
     else
-        # ── kind path (unchanged) ─────────────────────────────────────────────
         delete_manifest "${SCRIPT_DIR}/manifests/causa/deployment.yaml" "${INSTALL_NAMESPACE}"
     fi
 
