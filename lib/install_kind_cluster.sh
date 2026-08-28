@@ -398,7 +398,8 @@ install_kind_cluster() {
     # Runs unconditionally so re-running the installer against an existing cluster
     # still catches host or VM limits that were lowered since the last install.
     if ! _tune_kind_node_sysctls; then
-        exit 1
+        log_error "inotify sysctl check failed — aborting Kind cluster setup"
+        return 1
     fi
 
     ${KUBE_CLI} config use-context "kind-${KIND_CLUSTER_NAME}" >>"${LOG_FILE}" 2>&1 || true
