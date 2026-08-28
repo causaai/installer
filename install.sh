@@ -112,7 +112,7 @@ source "${SCRIPT_DIR}/lib/install_utils.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/install_prometheus.sh"
-[[ -f "${SCRIPT_DIR}/lib/enable_monitoring.sh" ]] && source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
+source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
 source "${SCRIPT_DIR}/lib/install_jafra.sh"
@@ -390,9 +390,6 @@ main() {
     log_install_success "Kubernetes MCP Server"
     installed_components+=("Kubernetes MCP Server")
 
-    # Steps 4-6 (Jafra + Quarkus MCP) are kind-only — OpenShift support lands in
-    # feat/openshift-jafra. Steps 7-9 (PostgreSQL, Causa Backend, Causa MCP) run
-    # on both kind and OpenShift.
     _is_kind_target && _install_kind_components
 
     # ── Steps 7-9: PostgreSQL + Causa Backend + Causa MCP (openshift target) ─

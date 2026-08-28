@@ -6,9 +6,8 @@
 # Deploys the Causa RCA engine as a Kubernetes Deployment + Service.
 # Image is configured via CAUSA_BACKEND_IMAGE (see lib/images.env).
 #
-# OpenShift target: applies manifests/openshift/causa-backend-manifests.yaml
-#   (ConfigMap + ServiceAccount + Deployment with OCP security context +
-#    ClusterIP Service) then the Route from causa-backend-route.yaml.
+# OpenShift target: applies manifests/openshift/causa-backend/ files
+#   (serviceaccount, configmap, deployment, service, route).
 # kind target: applies manifests/causa/deployment.yaml (NodePort Service).
 ################################################################################
 
