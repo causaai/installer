@@ -7,7 +7,7 @@
 #   # or set it in your Deployment's pod template metadata.labels
 #
 # When any alert fires, Alertmanager POSTs the full payload to:
-#   http://causa-backend.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080/api/v1/alerts
+#   http://causa-backend.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080/api/v1/webhooks/alerts
 # which triggers Causa Backend to start an RCA for the affected workload.
 #
 # The backend cooldown is 15 minutes — repeat_interval in the Alertmanager config

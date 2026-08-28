@@ -1,0 +1,13 @@
+---
+# OpenShift User Workload Monitoring — cluster-monitoring-config
+# Applied by the installer to enable monitoring for user-defined projects.
+# Reference:
+#   https://docs.openshift.com/container-platform/latest/monitoring/enabling-monitoring-for-user-defined-projects.html
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true

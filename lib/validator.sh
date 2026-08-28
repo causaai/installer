@@ -220,6 +220,16 @@ validate_cluster_access() {
     fi
 
     write_to_log_file "SUCCESS" "Cluster is reachable (context: ${ctx})"
+
+    # OpenShift: ensure the install namespace exists before any component step runs.
+    # For kind the namespace is created by install_prometheus (step 2), after the
+    # cluster itself is provisioned in step 1.
+    if _is_openshift_target; then
+        if ! create_namespace; then
+            return 1
+        fi
+    fi
+
     log_validation_success "Validating Cluster Access"
     return 0
 }
