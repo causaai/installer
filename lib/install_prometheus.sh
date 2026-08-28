@@ -6,7 +6,7 @@
 # Installs kube-prometheus-stack (Prometheus Operator + Prometheus + Alertmanager)
 # via Helm into the monitoring namespace, then configures Alertmanager with a
 # webhook receiver pointing to the Causa Backend at:
-#   http://causa-backend.<INSTALL_NAMESPACE>.svc.cluster.local:8080/api/v1/alerts
+#   http://causa-backend.<INSTALL_NAMESPACE>.svc.cluster.local:8080/api/v1/webhooks/alerts
 #
 # Why this is needed on Kind (but not OpenShift):
 #   - OpenShift ships with User Workload Monitoring (Prometheus + Alertmanager built in)
@@ -44,7 +44,7 @@ export PROMETHEUS_NAMESPACE PROMETHEUS_RELEASE_NAME
 # Uses internal cluster DNS — Alertmanager and Causa Backend are both in-cluster.
 ################################################################################
 _causa_alertmanager_webhook_url() {
-    echo "http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080/api/v1/alerts"
+    echo "http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080/api/v1/webhooks/alerts"
 }
 
 ################################################################################
@@ -60,7 +60,7 @@ _prometheus_already_installed() {
 # _write_alertmanager_values
 # Writes a temporary Helm values file that:
 #   1. Configures a single Alertmanager route → causa-webhook receiver
-#   2. Sets the webhook URL to the Causa Backend /api/v1/alerts endpoint
+#   2. Sets the webhook URL to the Causa Backend /api/v1/webhooks/alerts endpoint
 #   3. Disables the default null receiver so all alerts go to Causa
 #   4. Keeps Prometheus resource limits low for a local Kind cluster
 # Prints the path to the temp file.

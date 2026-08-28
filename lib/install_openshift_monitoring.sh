@@ -21,7 +21,7 @@
 # This script:
 #   1. Enables User Workload Monitoring (if not already on)
 #   2. Configures the correct Alertmanager with a webhook receiver pointing to:
-#        http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/alerts
+#        http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/webhooks/alerts
 #
 # References:
 #   https://docs.openshift.com/container-platform/latest/monitoring/enabling-monitoring-for-user-defined-projects.html
@@ -48,7 +48,7 @@ export OCP_UWM_NAMESPACE OCP_MONITORING_NAMESPACE \
 # _ocp_causa_alertmanager_webhook_url
 ################################################################################
 _ocp_causa_alertmanager_webhook_url() {
-    echo "http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080/api/v1/alerts"
+    echo "http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080/api/v1/webhooks/alerts"
 }
 
 ################################################################################
