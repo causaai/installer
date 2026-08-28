@@ -35,8 +35,6 @@ install_jafra_mcp() {
         return 0
     fi
 
-    if ! create_namespace; then return 1; fi
-
     local manifest; manifest=$(_jafra_mcp_manifest)
     local img="${JAFRA_MCP_IMAGE}"
 
@@ -55,7 +53,18 @@ install_jafra_mcp() {
     fi
 
     write_to_log_file "SUCCESS" "Jafra MCP Server installed"
-    write_to_log_file "INFO" "NodePort: localhost:30003"
+
+    # On OpenShift expose via a Route
+    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
+        local route="${SCRIPT_DIR}/manifests/openshift/jafra-mcp-route.yaml"
+        if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
+            log_error "Failed to apply Jafra MCP Server Route"
+            return 1
+        fi
+        write_to_log_file "INFO" "Route created for Jafra MCP Server"
+    else
+        write_to_log_file "INFO" "NodePort: http://localhost:30003/mcp"
+    fi
 
     return 0
 }
@@ -78,6 +87,11 @@ uninstall_jafra_mcp() {
 
     local manifest; manifest=$(_jafra_mcp_manifest)
     delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
+
+    # Remove Route on OpenShift
+    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
+        delete_manifest "${SCRIPT_DIR}/manifests/openshift/jafra-mcp-route.yaml" "${INSTALL_NAMESPACE}"
+    fi
 
     write_to_log_file "SUCCESS" "Jafra MCP Server uninstalled"
     return 0

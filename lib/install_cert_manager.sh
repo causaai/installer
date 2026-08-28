@@ -113,7 +113,33 @@ install_cert_manager() {
         fi
     done
 
-    # ── 4. Label namespace — marks cert-manager as ours to uninstall ─────────
+    # ── 4. Wait for webhook CA bundle injection ───────────────────────────────
+    # Pods being ready is not enough — the cainjector must inject the CA bundle
+    # into the webhook's caBundle field before the API server will accept
+    # cert-manager resources.  Probe with a dry-run Issuer until it succeeds.
+    write_to_log_file "INFO" "Waiting for cert-manager webhook CA bundle injection..."
+    local probe; probe=$(mktemp /tmp/causa-$$-cm-probe-XXXXXX.yaml) || {
+        write_to_log_file "WARN" "mktemp failed — skipping webhook CA probe"
+    }
+    if [[ -n "${probe:-}" ]]; then
+        printf 'apiVersion: cert-manager.io/v1\nkind: Issuer\nmetadata:\n  name: causa-webhook-probe\n  namespace: cert-manager\nspec:\n  selfSigned: {}\n' > "${probe}"
+        local attempt
+        for attempt in $(seq 1 60); do
+            if ${KUBE_CLI} apply --dry-run=server -f "${probe}" &>/dev/null; then
+                rm -f "${probe}"
+                write_to_log_file "SUCCESS" "cert-manager webhook is accepting requests"
+                break
+            fi
+            if [[ ${attempt} -eq 60 ]]; then
+                rm -f "${probe}"
+                log_error "cert-manager webhook did not become ready after 120s"
+                return 1
+            fi
+            sleep 2
+        done
+    fi
+
+    # ── 5. Label namespace — marks cert-manager as ours to uninstall ─────────
     write_to_log_file "INFO" "Labelling cert-manager namespace as causa-installer managed"
     if ! _label_cert_manager_namespace; then
         write_to_log_file "WARN" "Failed to label cert-manager namespace — uninstall may not remove it automatically"
