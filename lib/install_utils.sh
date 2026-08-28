@@ -210,8 +210,10 @@ apply_manifest() {
 
     local tmp; tmp=$(mktemp /tmp/causa-rca-manifest-XXXXXX.yaml)
 
-    # Namespace substitution
-    sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${manifest}" > "${tmp}"
+    # Namespace and cluster-type substitution
+    sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
+        -e "s/PLACEHOLDER_CLUSTER_TYPE/${INSTALL_TARGET:-kind}/g" \
+        "${manifest}" > "${tmp}"
 
     # Optional image substitution
     if [[ -n "${img_pattern}" && -n "${img_value}" ]]; then

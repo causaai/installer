@@ -170,6 +170,113 @@ _is_openshift_target() {
 }
 
 ################################################################################
+# _install_kind_components — Steps 4-9 (kind target only)
+# OpenShift support for each step lands in its own follow-on PR.
+################################################################################
+_install_kind_components() {
+    # ── Step 4: Jafra Ecosystem (Controller) ─────────────────────────────────
+    start_spinner "Installing Jafra Ecosystem..."
+    if ! install_jafra; then
+        stop_spinner
+        log_warn "Jafra Ecosystem installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Jafra Ecosystem"
+        installed_components+=("Jafra Ecosystem")
+    fi
+
+    # ── Step 5: Jafra MCP Server ─────────────────────────────────────────────
+    start_spinner "Installing Jafra MCP Server..."
+    if ! install_jafra_mcp; then
+        stop_spinner
+        log_warn "Jafra MCP Server installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Jafra MCP Server"
+        installed_components+=("Jafra MCP Server")
+    fi
+
+    # ── Step 6: Quarkus MCP Server ───────────────────────────────────────────
+    start_spinner "Installing Quarkus MCP Server..."
+    if ! install_quarkus_mcp; then
+        stop_spinner
+        log_warn "Quarkus MCP Server installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Quarkus MCP Server"
+        installed_components+=("Quarkus MCP Server")
+    fi
+
+    # ── Step 7: PostgreSQL ───────────────────────────────────────────────────
+    start_spinner "Installing PostgreSQL..."
+    if ! install_postgres; then
+        stop_spinner
+        log_error "Failed to install PostgreSQL"
+        exit 1
+    fi
+    stop_spinner
+    log_install_success "PostgreSQL"
+    installed_components+=("PostgreSQL")
+
+    # ── Step 8: Causa Backend ────────────────────────────────────────────────
+    start_spinner "Installing Causa Backend..."
+    if ! install_causa; then
+        stop_spinner
+        log_error "Failed to install Causa Backend"
+        exit 1
+    fi
+    stop_spinner
+    log_install_success "Causa Backend"
+    installed_components+=("Causa Backend")
+
+    # ── Step 9: Causa MCP Server ─────────────────────────────────────────────
+    start_spinner "Installing Causa MCP Server..."
+    if ! install_causa_mcp; then
+        stop_spinner
+        log_warn "Causa MCP Server installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Causa MCP Server"
+        installed_components+=("Causa MCP Server")
+    fi
+}
+
+################################################################################
+# _uninstall_kind_components — teardown for kind-only components
+################################################################################
+_uninstall_kind_components() {
+    start_spinner "Uninstalling Causa MCP Server..."
+    uninstall_causa_mcp
+    stop_spinner; log_uninstall_success "Causa MCP Server"
+
+    start_spinner "Uninstalling Quarkus MCP Server..."
+    uninstall_quarkus_mcp
+    stop_spinner; log_uninstall_success "Quarkus MCP Server"
+
+    start_spinner "Uninstalling Jafra MCP Server..."
+    uninstall_jafra_mcp
+    stop_spinner; log_uninstall_success "Jafra MCP Server"
+
+    start_spinner "Uninstalling Jafra Ecosystem..."
+    uninstall_jafra
+    stop_spinner; log_uninstall_success "Jafra Ecosystem"
+
+    start_spinner "Uninstalling cert-manager..."
+    uninstall_cert_manager
+    stop_spinner; log_uninstall_success "cert-manager"
+
+    start_spinner "Uninstalling Causa Backend..."
+    if ! uninstall_causa; then
+        stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
+    fi
+    stop_spinner; log_uninstall_success "Causa Backend"
+
+    start_spinner "Uninstalling PostgreSQL..."
+    uninstall_postgres
+    stop_spinner; log_uninstall_success "PostgreSQL"
+}
+
+################################################################################
 # main — install
 ################################################################################
 main() {
@@ -235,7 +342,9 @@ main() {
         fi
     fi
 
-    # ── Step 2a: OpenShift namespace setup (openshift target only) ───────────
+    # ── Steps 2a+2b: OpenShift namespace setup + monitoring (openshift only) ─
+    # 2b depends on 2a (namespace must exist before Alertmanager config runs),
+    # so both steps are kept inside one _is_openshift_target guard.
     if _is_openshift_target; then
         start_spinner "Setting up OpenShift namespace..."
         if ! install_openshift_infra; then
@@ -246,10 +355,7 @@ main() {
         stop_spinner
         log_install_success "OpenShift Namespace (${INSTALL_NAMESPACE})"
         installed_components+=("OpenShift Namespace")
-    fi
 
-    # ── Step 2b: OpenShift monitoring (openshift target only) ────────────────
-    if _is_openshift_target; then
         start_spinner "Configuring OpenShift User Workload Monitoring..."
         if ! install_openshift_prometheus; then
             stop_spinner
@@ -302,73 +408,7 @@ main() {
     #   Jafra Ecosystem + Jafra MCP  → feat/openshift-jafra
     #   Quarkus MCP + PostgreSQL     → feat/openshift-postgres
     #   Causa Backend + Causa MCP    → feat/openshift-routes
-    if _is_kind_target; then
-        # ── Step 4: Jafra Ecosystem (Controller) ─────────────────────────────
-        start_spinner "Installing Jafra Ecosystem..."
-        if ! install_jafra; then
-            stop_spinner
-            log_warn "Jafra Ecosystem installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Jafra Ecosystem"
-            installed_components+=("Jafra Ecosystem")
-        fi
-
-        # ── Step 5: Jafra MCP Server ──────────────────────────────────────────
-        start_spinner "Installing Jafra MCP Server..."
-        if ! install_jafra_mcp; then
-            stop_spinner
-            log_warn "Jafra MCP Server installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Jafra MCP Server"
-            installed_components+=("Jafra MCP Server")
-        fi
-
-        # ── Step 6: Quarkus MCP Server ────────────────────────────────────────
-        start_spinner "Installing Quarkus MCP Server..."
-        if ! install_quarkus_mcp; then
-            stop_spinner
-            log_warn "Quarkus MCP Server installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Quarkus MCP Server"
-            installed_components+=("Quarkus MCP Server")
-        fi
-
-        # ── Step 7: PostgreSQL ────────────────────────────────────────────────
-        start_spinner "Installing PostgreSQL..."
-        if ! install_postgres; then
-            stop_spinner
-            log_error "Failed to install PostgreSQL"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "PostgreSQL"
-        installed_components+=("PostgreSQL")
-
-        # ── Step 8: Causa Backend ─────────────────────────────────────────────
-        start_spinner "Installing Causa Backend..."
-        if ! install_causa; then
-            stop_spinner
-            log_error "Failed to install Causa Backend"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "Causa Backend"
-        installed_components+=("Causa Backend")
-
-        # ── Step 9: Causa MCP Server ──────────────────────────────────────────
-        start_spinner "Installing Causa MCP Server..."
-        if ! install_causa_mcp; then
-            stop_spinner
-            log_warn "Causa MCP Server installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Causa MCP Server"
-            installed_components+=("Causa MCP Server")
-        fi
-    fi
+    _is_kind_target && _install_kind_components
 
     # ── Post-install summary ─────────────────────────────────────────────────
     {
@@ -419,37 +459,7 @@ uninstall_main() {
         export CONTAINER_RUNTIME
     fi
 
-    if _is_kind_target; then
-        start_spinner "Uninstalling Causa MCP Server..."
-        uninstall_causa_mcp
-        stop_spinner; log_uninstall_success "Causa MCP Server"
-
-        start_spinner "Uninstalling Quarkus MCP Server..."
-        uninstall_quarkus_mcp
-        stop_spinner; log_uninstall_success "Quarkus MCP Server"
-
-        start_spinner "Uninstalling Jafra MCP Server..."
-        uninstall_jafra_mcp
-        stop_spinner; log_uninstall_success "Jafra MCP Server"
-
-        start_spinner "Uninstalling Jafra Ecosystem..."
-        uninstall_jafra
-        stop_spinner; log_uninstall_success "Jafra Ecosystem"
-
-        start_spinner "Uninstalling cert-manager..."
-        uninstall_cert_manager
-        stop_spinner; log_uninstall_success "cert-manager"
-
-        start_spinner "Uninstalling Causa Backend..."
-        if ! uninstall_causa; then
-            stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
-        fi
-        stop_spinner; log_uninstall_success "Causa Backend"
-
-        start_spinner "Uninstalling PostgreSQL..."
-        uninstall_postgres
-        stop_spinner; log_uninstall_success "PostgreSQL"
-    fi
+    _is_kind_target && _uninstall_kind_components
 
     start_spinner "Uninstalling Kubernetes MCP Server..."
     if ! uninstall_kubernetes_mcp_server; then

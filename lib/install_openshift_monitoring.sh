@@ -62,8 +62,34 @@ _ocp_uwm_alertmanager_present() {
 }
 
 ################################################################################
+# _ocp_check_alertmanager_permissions
+# Verifies the current user can patch Secrets in openshift-monitoring.
+# Patching alertmanager-main requires cluster-admin (or an equivalent role).
+# Fail early with an actionable message rather than a buried API error.
+################################################################################
+_ocp_check_alertmanager_permissions() {
+    local ns="${OCP_MONITORING_NAMESPACE}"
+    local secret="${OCP_PLATFORM_ALERTMANAGER_SECRET}"
+
+    write_to_log_file "INFO" "Checking permissions to patch Alertmanager Secret in ${ns}..."
+
+    if ! ${KUBE_CLI} auth can-i update secrets \
+            --namespace "${ns}" >>"${LOG_FILE}" 2>&1; then
+        log_error "Insufficient permissions: cannot update Secrets in namespace '${ns}'"
+        log_error "Patching '${secret}' requires cluster-admin (or equivalent)."
+        log_error "Re-run after logging in with a cluster-admin account:"
+        log_error "  oc login --username=<admin-user> --server=<api-url>"
+        return 1
+    fi
+
+    write_to_log_file "INFO" "Permission check passed (can update Secrets in ${ns})"
+    return 0
+}
+
+################################################################################
 # _ocp_enable_user_workload_monitoring
 # Patches cluster-monitoring-config to enable UWM. Idempotent.
+# The ConfigMap manifest lives at manifests/openshift/cluster-monitoring-config.yaml
 ################################################################################
 _ocp_enable_user_workload_monitoring() {
     local cm_name="cluster-monitoring-config"
@@ -82,17 +108,8 @@ _ocp_enable_user_workload_monitoring() {
     fi
 
     write_to_log_file "INFO" "Enabling User Workload Monitoring..."
-    if ! ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1 << EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: ${cm_name}
-  namespace: ${cm_ns}
-data:
-  config.yaml: |
-    enableUserWorkload: true
-EOF
-    then
+    local cm_manifest="${SCRIPT_DIR}/manifests/openshift/cluster-monitoring-config.yaml"
+    if ! ${KUBE_CLI} apply -f "${cm_manifest}" >>"${LOG_FILE}" 2>&1; then
         log_error "Failed to apply User Workload Monitoring ConfigMap"
         return 1
     fi
@@ -316,10 +333,9 @@ install_openshift_prometheus() {
         return 1
     fi
 
-    # ── 2. Ensure install namespace exists ───────────────────────────────────
-    if ! create_namespace; then return 1; fi
-
-    # ── 3. Configure Alertmanager (topology-aware) ───────────────────────────
+    # ── 2. Configure Alertmanager (topology-aware) ───────────────────────────
+    # Namespace is guaranteed to exist at this point — install_openshift_infra
+    # (Step 2a in install.sh) runs before this function is called.
     if _ocp_uwm_alertmanager_present; then
         write_to_log_file "INFO" "Topology A: UWM Alertmanager detected — configuring alertmanager-user-workload"
         if ! _ocp_configure_uwm_alertmanager; then
@@ -327,6 +343,10 @@ install_openshift_prometheus() {
         fi
     else
         write_to_log_file "INFO" "Topology B: No UWM Alertmanager — configuring platform alertmanager-main"
+        # Topology B requires cluster-admin to patch alertmanager-main
+        if ! _ocp_check_alertmanager_permissions; then
+            return 1
+        fi
         if ! _ocp_configure_platform_alertmanager; then
             return 1
         fi

@@ -59,7 +59,7 @@ spec:
             # Cluster identity
             # ----------------------------------------------------------------
             - name: CLUSTER_TYPE
-              value: "kind"
+              value: "PLACEHOLDER_CLUSTER_TYPE"
             - name: CAUSA_LOG_LEVEL
               value: "INFO"
           envFrom:
