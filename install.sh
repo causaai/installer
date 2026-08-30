@@ -435,9 +435,6 @@ main() {
 
     post_component_validation "${elapsed}"
 
-    # ── Port-forward instructions ────────────────────────────────────────────
-    _print_access_summary
-
     write_to_log_file "SUCCESS" "Installation completed in ${elapsed}"
     if [[ -n "${LOG_FILE:-}" ]]; then
         write_to_log_file "INFO" "Log: ${LOG_FILE}"
@@ -559,72 +556,6 @@ uninstall_main() {
         echo ""
     } >/dev/tty 2>/dev/null || true
     exit 0
-}
-
-################################################################################
-# _print_access_summary
-################################################################################
-_print_access_summary() {
-
-    # Helper: fetch an OpenShift route host, return a fallback message if absent.
-    _route_url() {
-        local route_name="$1"
-        local path="${2:-}"
-        local host
-        host=$(${KUBE_CLI} get route "${route_name}" \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.spec.host}' 2>/dev/null || true)
-        if [[ -n "${host}" ]]; then
-            echo "https://${host}${path}"
-        else
-            echo "(not available — ${KUBE_CLI} get route ${route_name} -n ${INSTALL_NAMESPACE})"
-        fi
-    }
-
-    if _is_openshift_target; then
-        local k8s_mcp_url jafra_mcp_url quarkus_mcp_url backend_url causa_mcp_url
-        k8s_mcp_url=$(_route_url "kubernetes-mcp-server" "/mcp")
-        jafra_mcp_url=$(_route_url "jafra-mcp"           "/mcp")
-        quarkus_mcp_url=$(_route_url "quarkus-mcp"       "/mcp")
-        backend_url=$(_route_url    "causa-backend"      "/api/v1/diagnostics")
-        causa_mcp_url=$(_route_url  "causa-mcp"          "/mcp")
-
-        {
-            echo ""
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-            echo ""
-            echo -e "${COLOR_GREEN}Kubernetes MCP Server :${COLOR_RESET}  ${k8s_mcp_url}"
-            echo -e "${COLOR_GREEN}Jafra MCP Server      :${COLOR_RESET}  ${jafra_mcp_url}"
-            echo -e "${COLOR_GREEN}Quarkus MCP Server    :${COLOR_RESET}  ${quarkus_mcp_url}"
-            echo -e "${COLOR_GREEN}Causa Backend API     :${COLOR_RESET}  ${backend_url}"
-            echo -e "${COLOR_GREEN}Causa MCP Server      :${COLOR_RESET}  ${causa_mcp_url}"
-            echo ""
-            if [[ -n "${LOG_FILE:-}" ]]; then
-                echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
-            fi
-            echo ""
-        } >/dev/tty 2>/dev/null || true
-    else
-        {
-            echo ""
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
-            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-            echo ""
-            echo -e "${COLOR_GREEN}Kubernetes MCP Server :${COLOR_RESET}  http://localhost:30000/mcp"
-            echo -e "${COLOR_GREEN}Jafra MCP Server      :${COLOR_RESET}  http://localhost:30003/mcp  (Kind node only — not mapped to localhost)"
-            echo -e "${COLOR_GREEN}Quarkus MCP Server    :${COLOR_RESET}  http://localhost:30004/mcp"
-            echo -e "${COLOR_GREEN}Causa Backend API     :${COLOR_RESET}  http://localhost:30001/api/v1/diagnostics"
-            echo -e "${COLOR_GREEN}Causa MCP Server      :${COLOR_RESET}  http://localhost:30005/mcp"
-            echo ""
-            if [[ -n "${LOG_FILE:-}" ]]; then
-                echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
-            fi
-            echo ""
-        } >/dev/tty 2>/dev/null || true
-    fi
 }
 
 ################################################################################
