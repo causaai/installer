@@ -11,6 +11,9 @@ kubectl get pods -n causa-rca
 
 # Watch pod status in real time
 kubectl get pods -n causa-rca -w
+
+# On OpenShift
+oc get pods -n causa-rca
 ```
 
 ## Component-specific checks
@@ -28,8 +31,27 @@ kubectl logs -n causa-rca -l app=kubernetes-mcp-server
 kubectl get pods -n causa-rca -l app=causa-backend
 kubectl logs -n causa-rca -l app=causa-backend
 
-# Health check (requires NodePort access)
+# Verify MCP env vars were stamped correctly
+kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
+
+# Health check (Kind — requires NodePort access)
 curl http://localhost:30001/q/health/ready
+```
+
+### Jafra Ecosystem
+
+```bash
+# Controller
+kubectl get pods -n causa-rca -l app=jafra-controller
+kubectl logs -n causa-rca -l app=jafra-controller
+
+# Analyzer
+kubectl get pods -n causa-rca -l app=jafra-analyzer
+kubectl logs -n causa-rca -l app=jafra-analyzer
+
+# Agent (DaemonSet)
+kubectl get pods -n causa-rca -l app=jafra-agent
+kubectl logs -n causa-rca -l app=jafra-agent
 ```
 
 ### Jafra MCP Server
@@ -56,10 +78,15 @@ kubectl logs -n causa-rca -l app=causa-mcp
 ### PostgreSQL
 
 ```bash
+# Kind — standalone Deployment
 kubectl get pods -n causa-rca -l app=postgres
 kubectl logs -n causa-rca -l app=postgres
 
-# Verify secrets exist
+# OpenShift — CloudNativePG Cluster
+kubectl get cluster.postgresql.cnpg.io iri-db -n causa-rca
+kubectl get pods -n causa-rca -l cnpg.io/cluster=iri-db
+
+# Verify secrets exist (both targets)
 kubectl get secret causa-db-secrets -n causa-rca
 kubectl get secret postgres-credentials -n causa-rca
 ```
@@ -72,19 +99,40 @@ kubectl cluster-info --context kind-causa-rca
 kubectl get nodes
 ```
 
+### OpenShift Routes
+
+```bash
+# Check all routes in the namespace
+oc get routes -n causa-rca
+
+# Get Causa Backend route host
+oc get route causa-backend -n causa-rca -o jsonpath='{.spec.host}'
+```
+
 ## Common errors
 
 ### Prerequisites missing
 
-The installer checks for `kubectl`, `docker`/`podman`, `kind`, `curl`, `grep`, `sed`, and `awk` before doing anything. Install any missing tools and rerun.
+The installer checks for required tools before doing anything. Install any missing tools and rerun.
 
+**Kind:**
 ```bash
 # kind — macOS
 brew install kind
 # or see https://kind.sigs.k8s.io/docs/user/quick-start/#installation
+
+# helm
+brew install helm
+# or see https://helm.sh/docs/intro/install/
 ```
 
-### Container runtime not running
+**OpenShift:**
+```bash
+# oc — download from your cluster's CLI tools page or:
+# https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html
+```
+
+### Container runtime not running (Kind)
 
 ```bash
 # Docker — macOS: start Docker Desktop from the menu bar
@@ -95,7 +143,7 @@ sudo systemctl start docker
 podman machine start
 ```
 
-### Podman rootless mode
+### Podman rootless mode (Kind)
 
 Kind requires rootful Podman. Recreate the machine with rootful mode:
 
@@ -106,7 +154,16 @@ podman machine init --rootful --cpus 4 --memory 4096
 podman machine start
 ```
 
-### Cluster not reachable
+### Not logged in (OpenShift)
+
+```bash
+# Log in and retry
+oc login <api-url> --token=<token>
+# or
+oc login <api-url> -u <user> -p <password>
+```
+
+### Cluster not reachable (Kind)
 
 ```bash
 # Verify the cluster exists
@@ -120,7 +177,7 @@ kind delete cluster --name causa-rca
 ./install.sh
 ```
 
-### Ports already in use (30000, 30001, 30004, 30005)
+### Ports already in use — 30000, 30001, 30004, 30005 (Kind)
 
 After deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold the host port bindings.
 These are the four ports mapped to `localhost` in the Kind cluster config. Port 30003 (Jafra MCP) is a
@@ -137,7 +194,7 @@ podman machine stop && podman machine start
 
 ### Pod stuck in `Pending`
 
-Usually a resource or scheduling issue on the Kind node.
+Usually a resource or scheduling issue on the node.
 
 ```bash
 kubectl describe pod -n causa-rca <pod-name>
@@ -146,17 +203,70 @@ kubectl get events -n causa-rca --sort-by='.lastTimestamp'
 
 ### PostgreSQL not ready
 
-The Causa Backend waits for PostgreSQL before starting. Check:
+The Causa Backend waits for PostgreSQL before starting.
 
+**Kind:**
 ```bash
 kubectl get pods -n causa-rca -l app=postgres
 kubectl describe pod -n causa-rca -l app=postgres
+
+# Ensure the secret was created
+kubectl get secret postgres-credentials -n causa-rca
 ```
 
-Ensure the `postgres-credentials` secret was created:
+**OpenShift (CNPG):**
+```bash
+# Check cluster status
+kubectl get cluster.postgresql.cnpg.io iri-db -n causa-rca -o jsonpath='{.status.phase}'
+
+# Check operator subscription
+kubectl get subscription cloudnative-pg -n openshift-operators
+kubectl get csv -n openshift-operators | grep cloudnative-pg
+```
+
+### Causa Backend env vars not set
+
+After install, verify the three MCP endpoint env vars were stamped:
 
 ```bash
-kubectl get secret postgres-credentials -n causa-rca
+kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
+```
+
+Expected output:
+```
+CAUSA_MCP_QUARKUS_ENDPOINT=http://mcp-metrics.causa-rca.svc.cluster.local:8080
+CAUSA_MCP_QUARKUS_METRICS_BASE_URL=<your value or empty>
+CAUSA_MCP_ASYNC_PROFILER_ENDPOINT=http://jafra-mcp.causa-rca.svc.cluster.local:8083
+```
+
+To update `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` after install:
+
+```bash
+kubectl set env deployment/causa-backend -n causa-rca \
+  CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-namespace.svc.cluster.local:8080"
+
+# Wait for rollout
+kubectl rollout status deployment/causa-backend -n causa-rca --timeout=180s
+```
+
+### Causa Backend rollout stuck after env var update
+
+```bash
+# Check pod events
+kubectl describe pods -n causa-rca -l app=causa-backend
+
+# Check readiness/liveness probe failures
+kubectl logs -n causa-rca -l app=causa-backend --previous
+```
+
+### Jafra cert-manager not ready (Kind)
+
+The Jafra Controller requires cert-manager. If it fails:
+
+```bash
+kubectl get pods -n cert-manager
+kubectl rollout status deployment/cert-manager -n cert-manager
+kubectl rollout status deployment/cert-manager-webhook -n cert-manager
 ```
 
 ## Logs
