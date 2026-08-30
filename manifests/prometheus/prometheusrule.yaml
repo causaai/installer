@@ -73,6 +73,8 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
+            container: "{{ $labels.container }}"
+            pod: "{{ $labels.pod }}"
           annotations:
             summary: "High memory usage in pod {{ $labels.pod }} ({{ $value | humanizePercentage }})"
             description: >-
@@ -104,6 +106,8 @@ spec:
           labels:
             severity: critical
             namespace: PLACEHOLDER_NAMESPACE
+            container: "{{ $labels.container }}"
+            pod: "{{ $labels.pod }}"
           annotations:
             summary: "Container OOMKilled: {{ $labels.container }} in pod {{ $labels.pod }}"
             description: >-
@@ -134,6 +138,8 @@ spec:
           labels:
             severity: critical
             namespace: PLACEHOLDER_NAMESPACE
+            container: "{{ $labels.container }}"
+            pod: "{{ $labels.pod }}"
           annotations:
             summary: "CrashLoopBackOff: pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 10m"
             description: >-
@@ -173,6 +179,8 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
+            container: "{{ $labels.container }}"
+            pod: "{{ $labels.pod }}"
           annotations:
             summary: "CPU throttling {{ $value | humanizePercentage }} on container {{ $labels.container }} in pod {{ $labels.pod }}"
             description: >-
@@ -204,6 +212,8 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
+            container: "{{ $labels.container }}"
+            pod: "{{ $labels.pod }}"
           annotations:
             summary: "Frequent restarts: pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 30m"
             description: >-
