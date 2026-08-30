@@ -43,6 +43,10 @@ spec:
               value: "http://kubernetes-mcp-server.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080"
             - name: CAUSA_MCP_QUARKUS_ENDPOINT
               value: "http://mcp-metrics.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080"
+            - name: CAUSA_MCP_QUARKUS_METRICS_BASE_URL
+              value: "PLACEHOLDER_QUARKUS_METRICS_BASE_URL"
+            - name: CAUSA_MCP_ASYNC_PROFILER_ENDPOINT
+              value: "http://jafra-mcp.PLACEHOLDER_NAMESPACE.svc.cluster.local:8083"
             # ----------------------------------------------------------------
             # LLM configuration (optional — app starts without it)
             # Set via kubectl create secret or helm values in production

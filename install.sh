@@ -72,6 +72,11 @@ KIND_REGISTRY_NAME="${KIND_REGISTRY_NAME:-causa-rca-registry}"
 KIND_REGISTRY_PORT="${KIND_REGISTRY_PORT:-5001}"
 export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 
+# Configurable endpoint for the Quarkus app under analysis (used by Causa Backend)
+# Override via: export CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-ns.svc.cluster.local:8080"
+CAUSA_MCP_QUARKUS_METRICS_BASE_URL="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
+export CAUSA_MCP_QUARKUS_METRICS_BASE_URL
+
 # Image variables (populated by images.env; can be overridden via CLI flags)
 K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
 CAUSA_BACKEND_IMAGE="${CAUSA_BACKEND_IMAGE:-}"
@@ -460,6 +465,17 @@ uninstall_main() {
             write_to_log_file "WARN" "State file not found (${INSTALLER_STATE_FILE}); defaulting to ${CONTAINER_RUNTIME}"
         fi
         export CONTAINER_RUNTIME
+
+        # Switch kubectl to the Kind context before any delete calls.
+        # Without this, a leftover OpenShift/other context causes every kubectl
+        # delete to hang for the full API-server timeout before giving up.
+        local kind_ctx="kind-${KIND_CLUSTER_NAME}"
+        if ${KUBE_CLI} config get-contexts "${kind_ctx}" &>/dev/null; then
+            ${KUBE_CLI} config use-context "${kind_ctx}" >>"${LOG_FILE}" 2>&1 || true
+            write_to_log_file "INFO" "Switched kubectl context to ${kind_ctx} for uninstall"
+        else
+            write_to_log_file "WARN" "Kind context '${kind_ctx}' not found — kubectl may target the wrong cluster"
+        fi
     fi
 
     # Uninstall Quarkus MCP, Jafra MCP, and Jafra Ecosystem (all targets)
@@ -549,48 +565,66 @@ uninstall_main() {
 # _print_access_summary
 ################################################################################
 _print_access_summary() {
-    local backend_url mcp_url
+
+    # Helper: fetch an OpenShift route host, return a fallback message if absent.
+    _route_url() {
+        local route_name="$1"
+        local path="${2:-}"
+        local host
+        host=$(${KUBE_CLI} get route "${route_name}" \
+            -n "${INSTALL_NAMESPACE}" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+        if [[ -n "${host}" ]]; then
+            echo "https://${host}${path}"
+        else
+            echo "(not available — ${KUBE_CLI} get route ${route_name} -n ${INSTALL_NAMESPACE})"
+        fi
+    }
 
     if _is_openshift_target; then
-        # Fetch the hostnames assigned by the OpenShift ingress controller.
-        local backend_host mcp_host
-        backend_host=$(${KUBE_CLI} get route causa-backend \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.spec.host}' 2>/dev/null || true)
-        mcp_host=$(${KUBE_CLI} get route causa-mcp \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+        local k8s_mcp_url jafra_mcp_url quarkus_mcp_url backend_url causa_mcp_url
+        k8s_mcp_url=$(_route_url "kubernetes-mcp-server" "/mcp")
+        jafra_mcp_url=$(_route_url "jafra-mcp"           "/mcp")
+        quarkus_mcp_url=$(_route_url "quarkus-mcp"       "/mcp")
+        backend_url=$(_route_url    "causa-backend"      "/api/v1/diagnostics")
+        causa_mcp_url=$(_route_url  "causa-mcp"          "/mcp")
 
-        if [[ -n "${backend_host}" ]]; then
-            backend_url="https://${backend_host}/api/v1/diagnostics"
-        else
-            backend_url="(route host not yet available — run: ${KUBE_CLI} get route causa-backend -n ${INSTALL_NAMESPACE})"
-        fi
-
-        if [[ -n "${mcp_host}" ]]; then
-            mcp_url="https://${mcp_host}/mcp"
-        else
-            mcp_url="(route host not yet available — run: ${KUBE_CLI} get route causa-mcp -n ${INSTALL_NAMESPACE})"
-        fi
+        {
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_GREEN}Kubernetes MCP Server :${COLOR_RESET}  ${k8s_mcp_url}"
+            echo -e "${COLOR_GREEN}Jafra MCP Server      :${COLOR_RESET}  ${jafra_mcp_url}"
+            echo -e "${COLOR_GREEN}Quarkus MCP Server    :${COLOR_RESET}  ${quarkus_mcp_url}"
+            echo -e "${COLOR_GREEN}Causa Backend API     :${COLOR_RESET}  ${backend_url}"
+            echo -e "${COLOR_GREEN}Causa MCP Server      :${COLOR_RESET}  ${causa_mcp_url}"
+            echo ""
+            if [[ -n "${LOG_FILE:-}" ]]; then
+                echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
+            fi
+            echo ""
+        } >/dev/tty 2>/dev/null || true
     else
-        backend_url="http://localhost:30001/api/v1/diagnostics"
-        mcp_url="http://localhost:30005/mcp"
+        {
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_GREEN}Kubernetes MCP Server :${COLOR_RESET}  http://localhost:30000/mcp"
+            echo -e "${COLOR_GREEN}Jafra MCP Server      :${COLOR_RESET}  http://localhost:30003/mcp  (Kind node only — not mapped to localhost)"
+            echo -e "${COLOR_GREEN}Quarkus MCP Server    :${COLOR_RESET}  http://localhost:30004/mcp"
+            echo -e "${COLOR_GREEN}Causa Backend API     :${COLOR_RESET}  http://localhost:30001/api/v1/diagnostics"
+            echo -e "${COLOR_GREEN}Causa MCP Server      :${COLOR_RESET}  http://localhost:30005/mcp"
+            echo ""
+            if [[ -n "${LOG_FILE:-}" ]]; then
+                echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
+            fi
+            echo ""
+        } >/dev/tty 2>/dev/null || true
     fi
-
-    {
-        echo ""
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-        echo ""
-        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  ${backend_url}"
-        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  ${mcp_url}"
-        echo ""
-        if [[ -n "${LOG_FILE:-}" ]]; then
-            echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
-        fi
-        echo ""
-    } >/dev/tty 2>/dev/null || true
 }
 
 ################################################################################
@@ -634,6 +668,9 @@ show_usage() {
     echo "    TERMINATE=true                Uninstall mode"
     echo "    PROMETHEUS_NAMESPACE=NAME     Namespace for kube-prometheus-stack (default: monitoring)"
     echo "    DELETE_CLUSTER=true           Delete cluster on --terminate"
+    echo "    CAUSA_MCP_QUARKUS_METRICS_BASE_URL=URL"
+    echo "                                  Base URL of the Quarkus app under analysis"
+    echo "                                  (e.g. http://my-app.default.svc.cluster.local:8080)"
     echo ""
     echo "EXAMPLES:"
     echo "    # Full install on Kind (creates cluster + all components)"
