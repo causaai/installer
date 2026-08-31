@@ -55,7 +55,7 @@ install_quarkus_mcp() {
         write_to_log_file "INFO" "Using kube-prometheus-stack URL: ${prom_url}"
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
     sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
         -e "s|image: .*quarkus-mcp.*|image: ${img}|g" \
         -e "s|PROMETHEUS_URL:.*|PROMETHEUS_URL: \"${prom_url}\"|g" \
