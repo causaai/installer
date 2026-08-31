@@ -302,6 +302,16 @@ install_jafra() {
         return 0
     fi
 
+    write_to_log_file "INFO" "Waiting for cert-manager webhook to be ready..."
+    if ! _cert_manager_ready; then
+        log_error "cert-manager is not installed or not ready"
+        log_error "Jafra controller requires cert-manager for webhook TLS certificates"
+        return 1
+    fi
+    write_to_log_file "SUCCESS" "cert-manager webhook is ready"
+
+    if ! create_namespace; then return 1; fi
+
     if ! install_jafra_controller; then
         log_error "Failed to install Jafra controller"
         return 1
