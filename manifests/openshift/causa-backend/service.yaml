@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: causa-backend
+  namespace: PLACEHOLDER_NAMESPACE
+  labels:
+    app: causa-backend
+    app.kubernetes.io/name: causa-backend
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: management
+      port: 9000
+      targetPort: management
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: causa-backend

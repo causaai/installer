@@ -128,7 +128,6 @@ source "${SCRIPT_DIR}/lib/install_causa_mcp.sh"
 enable_cleanup_trap   # lib/install_utils.sh — log error on unexpected EXIT
 enable_spinner_trap   # lib/logging.sh       — stop spinner cleanly on INT/TERM
 
-# ---------------------------------------------------------------------------
 # Temp file cleanup — remove stale files from a previous crashed run.
 # Only removes files whose name encodes this process's PID, so a concurrent
 # installer invocation on the same host is not affected.
@@ -351,7 +350,6 @@ main() {
         fi
         stop_spinner
         log_install_success "Monitoring and Prometheus Alerts"
-        installed_components+=("Monitoring and Prometheus Alerts")
     fi
 
     # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
@@ -364,7 +362,6 @@ main() {
         fi
         stop_spinner
         log_install_success "Prometheus Stack (kube-prometheus-stack)"
-        installed_components+=("Prometheus Stack")
     fi
 
     # ── Step 3: cert-manager (kind target only, required by Jafra) ───────────
@@ -391,11 +388,40 @@ main() {
     log_install_success "Kubernetes MCP Server"
     installed_components+=("Kubernetes MCP Server")
 
-    # Steps 4-9 are kind-only — OpenShift support for each lands in its own PR:
-    #   Jafra Ecosystem + Jafra MCP  → feat/openshift-jafra
-    #   Quarkus MCP + PostgreSQL     → feat/openshift-postgres
-    #   Causa Backend + Causa MCP    → feat/openshift-routes
     _is_kind_target && _install_kind_components
+
+    # ── Steps 7-9: PostgreSQL + Causa Backend + Causa MCP (openshift target) ─
+    if _is_openshift_target; then
+        start_spinner "Installing PostgreSQL..."
+        if ! install_postgres; then
+            stop_spinner
+            log_error "Failed to install PostgreSQL"
+            exit 1
+        fi
+        stop_spinner
+        log_install_success "PostgreSQL"
+        installed_components+=("PostgreSQL")
+
+        start_spinner "Installing Causa Backend..."
+        if ! install_causa; then
+            stop_spinner
+            log_error "Failed to install Causa Backend"
+            exit 1
+        fi
+        stop_spinner
+        log_install_success "Causa Backend"
+        installed_components+=("Causa Backend")
+
+        start_spinner "Installing Causa MCP Server..."
+        if ! install_causa_mcp; then
+            stop_spinner
+            log_warn "Causa MCP Server installation skipped or failed"
+        else
+            stop_spinner
+            log_install_success "Causa MCP Server"
+            installed_components+=("Causa MCP Server")
+        fi
+    fi
 
     # ── Post-install summary ─────────────────────────────────────────────────
     {
@@ -463,6 +489,20 @@ uninstall_main() {
 
     # Uninstall OpenShift components (openshift target only)
     if _is_openshift_target; then
+        start_spinner "Uninstalling Causa MCP Server..."
+        uninstall_causa_mcp
+        stop_spinner; log_uninstall_success "Causa MCP Server"
+
+        start_spinner "Uninstalling Causa Backend..."
+        if ! uninstall_causa; then
+            stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
+        fi
+        stop_spinner; log_uninstall_success "Causa Backend"
+
+        start_spinner "Uninstalling PostgreSQL..."
+        uninstall_postgres
+        stop_spinner; log_uninstall_success "PostgreSQL"
+
         start_spinner "Disabling monitoring and Prometheus alerts..."
         disable_monitoring
         stop_spinner; log_uninstall_success "Monitoring and Prometheus Alerts"
@@ -503,14 +543,42 @@ uninstall_main() {
 # _print_access_summary
 ################################################################################
 _print_access_summary() {
+    local backend_url mcp_url
+
+    if _is_openshift_target; then
+        # Fetch the hostnames assigned by the OpenShift ingress controller.
+        local backend_host mcp_host
+        backend_host=$(${KUBE_CLI} get route causa-backend \
+            -n "${INSTALL_NAMESPACE}" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+        mcp_host=$(${KUBE_CLI} get route causa-mcp \
+            -n "${INSTALL_NAMESPACE}" \
+            -o jsonpath='{.spec.host}' 2>/dev/null || true)
+
+        if [[ -n "${backend_host}" ]]; then
+            backend_url="https://${backend_host}/api/v1/diagnostics"
+        else
+            backend_url="(route host not yet available — run: ${KUBE_CLI} get route causa-backend -n ${INSTALL_NAMESPACE})"
+        fi
+
+        if [[ -n "${mcp_host}" ]]; then
+            mcp_url="https://${mcp_host}/mcp"
+        else
+            mcp_url="(route host not yet available — run: ${KUBE_CLI} get route causa-mcp -n ${INSTALL_NAMESPACE})"
+        fi
+    else
+        backend_url="http://localhost:30001/api/v1/diagnostics"
+        mcp_url="http://localhost:30005/mcp"
+    fi
+
     {
         echo ""
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo ""
-        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  http://localhost:30001/api/v1/diagnostics"
-        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  http://localhost:30005/mcp"
+        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  ${backend_url}"
+        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  ${mcp_url}"
         echo ""
         if [[ -n "${LOG_FILE:-}" ]]; then
             echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
@@ -533,7 +601,7 @@ show_usage() {
     echo "                                    openshift  — deploys into an existing OpenShift cluster"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
-    echo "    --delete-cluster              Also delete the Kind cluster when terminating (kind only)"
+    echo "    --delete-cluster              Also delete the Kind cluster when terminating"
     echo "    --dry-run                     Validate without making changes"
     echo "    -h, --help                    Display this help message"
     echo ""

@@ -69,8 +69,6 @@ install_causa_mcp() {
         return 1
     fi
 
-    if ! create_namespace; then return 1; fi
-
     local manifest="${SCRIPT_DIR}/manifests/causa_mcp/deployment.yaml"
     local img="${CAUSA_MCP_IMAGE}"
 
@@ -87,8 +85,18 @@ install_causa_mcp() {
         return 1
     fi
 
+    if _is_openshift_target; then
+        local route="${SCRIPT_DIR}/manifests/openshift/causa-mcp-route.yaml"
+        if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
+            log_error "Failed to apply Causa MCP Server Route"
+            return 1
+        fi
+        write_to_log_file "INFO" "OpenShift Route applied for Causa MCP Server"
+    else
+        write_to_log_file "INFO" "NodePort: localhost:30005"
+    fi
+
     write_to_log_file "SUCCESS" "Causa MCP Server installed"
-    write_to_log_file "INFO"    "NodePort: localhost:30005"
     return 0
 }
 
@@ -105,6 +113,10 @@ uninstall_causa_mcp() {
 
     local manifest="${SCRIPT_DIR}/manifests/causa_mcp/deployment.yaml"
     delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
+
+    if _is_openshift_target; then
+        delete_manifest "${SCRIPT_DIR}/manifests/openshift/causa-mcp-route.yaml" "${INSTALL_NAMESPACE}"
+    fi
 
     write_to_log_file "SUCCESS" "Causa MCP Server uninstalled"
     return 0
