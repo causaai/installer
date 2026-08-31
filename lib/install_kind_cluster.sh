@@ -221,6 +221,121 @@ EOF
     write_to_log_file "SUCCESS" "Local registry ConfigMap applied"
 }
 
+# _tune_kind_node_sysctls
+#
+# Kind nodes share the Linux kernel's sysctl namespace for inotify.
+# inotify.max_user_instances defaults to 128 on most distros; repeated
+# jafra-agent crash-loop restarts exhaust it, causing EMFILE (OS error 24,
+# "Too many open files").
+#
+# On Linux the check reads /proc/sys directly.
+# On macOS inotify lives inside the Docker/OrbStack/colima Linux VM, not on
+# the macOS host, so the check is run via "docker exec" against the kind node.
+# If the container runtime is unavailable the check is skipped with a warning.
+#
+# Compatible with bash 3.2+ (no associative arrays).
+# Returns 1 with a clear remediation message if limits are too low.
+_tune_kind_node_sysctls() {
+    local _min_instances=512
+    local _min_watches=1048576
+
+    local _os
+    _os=$(uname -s 2>/dev/null || echo "Linux")
+
+    # ── Resolve how to read the sysctl values ─────────────────────────────────
+    local _cur_instances _cur_watches
+    local _remediation_header _remediation_cmds _remediation_persist
+
+    if [[ "$_os" == "Darwin" ]]; then
+        # macOS: inotify lives inside the kind node's Linux VM — exec into it.
+        # Use the same runtime that was used to create the cluster so we exec
+        # into the correct node container; do not probe for alternatives.
+        local _runtime="${CONTAINER_RUNTIME:-docker}"
+
+        if ! check_command_exists "$_runtime"; then
+            log_warn "$_runtime not found on macOS — skipping inotify sysctl check."
+            log_warn "If jafra-agent crashes with EMFILE, set inotify limits inside your Docker/OrbStack/colima VM."
+            return 0
+        fi
+
+        # Verify the runtime daemon is actually responsive before exec'ing into a node.
+        if ! "$_runtime" info &>/dev/null; then
+            log_warn "$_runtime is installed but not running on macOS — skipping inotify sysctl check."
+            log_warn "If jafra-agent crashes with EMFILE, start $_runtime and re-run, or set inotify limits inside the VM."
+            return 0
+        fi
+
+        # Derive the kind node container name from KIND_CLUSTER_NAME (set by caller).
+        local _node_container="${KIND_CLUSTER_NAME:-causa-rca}-control-plane"
+
+        # Read each sysctl value separately so we can detect a missing/stopped
+        # container rather than silently treating it as 0.
+        _cur_instances=$("$_runtime" exec "$_node_container" \
+            cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null)
+        _cur_watches=$("$_runtime" exec "$_node_container" \
+            cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null)
+
+        if [[ -z "$_cur_instances" || -z "$_cur_watches" ]]; then
+            log_warn "Could not read inotify sysctls from kind node '$_node_container' — skipping check."
+            log_warn "The container may not be running. If jafra-agent crashes with EMFILE, set:"
+            log_warn "  $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_instances=$_min_instances"
+            log_warn "  $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_watches=$_min_watches"
+            return 0
+        fi
+
+        _remediation_header="inotify limits inside the kind node VM are too low for the jafra-agent."
+        _remediation_cmds=\
+"  $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_instances=$_min_instances
+  $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_watches=$_min_watches"
+        _remediation_persist=\
+"Or configure your VM runtime (Docker Desktop / OrbStack / colima) to set:
+  fs.inotify.max_user_instances = $_min_instances
+  fs.inotify.max_user_watches   = $_min_watches"
+    else
+        # Linux: read directly from /proc/sys on the host.
+        _cur_instances=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
+        _cur_watches=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+
+        _remediation_header="Host inotify limits are too low for the jafra-agent."
+        _remediation_cmds=\
+"  sudo sysctl -w fs.inotify.max_user_instances=$_min_instances
+  sudo sysctl -w fs.inotify.max_user_watches=$_min_watches"
+        _remediation_persist=\
+"To persist across reboots, add to /etc/sysctl.d/99-kind.conf:
+  fs.inotify.max_user_instances = $_min_instances
+  fs.inotify.max_user_watches   = $_min_watches"
+    fi
+
+    # ── Compare values against minimums (same logic for both OS paths) ────────
+    local _needs_action=false
+
+    if [[ "$_cur_instances" -lt "$_min_instances" ]]; then
+        _needs_action=true
+        log_file_only "sysctl fs.inotify.max_user_instances is $_cur_instances (minimum required: $_min_instances)"
+    else
+        log_file_only "sysctl fs.inotify.max_user_instances = $_cur_instances (ok)"
+    fi
+
+    if [[ "$_cur_watches" -lt "$_min_watches" ]]; then
+        _needs_action=true
+        log_file_only "sysctl fs.inotify.max_user_watches is $_cur_watches (minimum required: $_min_watches)"
+    else
+        log_file_only "sysctl fs.inotify.max_user_watches = $_cur_watches (ok)"
+    fi
+
+    if [[ "$_needs_action" == "true" ]]; then
+        log_error "$_remediation_header"
+        log_error "The agent will crash with EMFILE (error 24: Too many open files)."
+        log_error "Run the following to fix:"
+        log_error "$_remediation_cmds"
+        log_error "$_remediation_persist"
+        return 1
+    fi
+
+    log_install_success "inotify sysctls OK (max_user_instances and max_user_watches meet minimums)"
+    return 0
+}
+
 # install_kind_cluster — start registry → create cluster → wire registry
 install_kind_cluster() {
     log_section_silent "Provisioning Kind Cluster"
@@ -275,6 +390,16 @@ install_kind_cluster() {
         fi
         rm -f "${kind_config}"
         write_to_log_file "SUCCESS" "Kind cluster '${KIND_CLUSTER_NAME}' created"
+    fi
+
+    # Check inotify sysctls after the cluster node container is confirmed running —
+    # both for newly created and pre-existing clusters.  On macOS the check
+    # exec's into the kind node; on Linux it reads /proc/sys on the host.
+    # Runs unconditionally so re-running the installer against an existing cluster
+    # still catches host or VM limits that were lowered since the last install.
+    if ! _tune_kind_node_sysctls; then
+        log_error "inotify sysctl check failed — aborting Kind cluster setup"
+        return 1
     fi
 
     ${KUBE_CLI} config use-context "kind-${KIND_CLUSTER_NAME}" >>"${LOG_FILE}" 2>&1 || true
@@ -364,6 +489,5 @@ uninstall_kind_cluster() {
 
     return 0
 }
-
 export -f install_kind_cluster
 export -f uninstall_kind_cluster
