@@ -103,9 +103,8 @@ Each manifest contains placeholder tokens that are substituted at apply time usi
 | `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` (may be empty) |
 
 The standard `apply_manifest` helper in `lib/install_utils.sh` handles `PLACEHOLDER_NAMESPACE`
-and `PLACEHOLDER_CLUSTER_TYPE`. Manifests that also require `PLACEHOLDER_QUARKUS_METRICS_BASE_URL`
-(the Causa Backend manifests) use an inline `sed` + temp-file approach in `install_causa.sh`
-before calling `kubectl apply`.
+and `PLACEHOLDER_CLUSTER_TYPE`. The `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` substitution is
+applied automatically for the Causa Backend manifests during installation.
 
 ## Optional components
 
