@@ -114,7 +114,11 @@ install_causa() {
         apply_manifest "${ocp_dir}/serviceaccount.yaml" "${INSTALL_NAMESPACE}" || return 1
 
         # configmap contains PLACEHOLDER_NAMESPACE and PLACEHOLDER_QUARKUS_METRICS_BASE_URL
-        local tmp_cm; tmp_cm=$(mktemp /tmp/causa-$$-configmap-XXXXXX.yaml)
+        local tmp_cm
+        if ! tmp_cm=$(mktemp /tmp/causa-$$-configmap-XXXXXX.yaml); then
+            log_error "Failed to create temporary file for Causa Backend ConfigMap"
+            return 1
+        fi
         sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
             -e "s|PLACEHOLDER_QUARKUS_METRICS_BASE_URL|${quarkus_metrics_base_url_escaped}|g" \
             "${ocp_dir}/configmap.yaml" > "${tmp_cm}"
@@ -159,7 +163,11 @@ install_causa() {
         # Build a temp manifest with all placeholders substituted (namespace,
         # cluster type, and the Quarkus metrics base URL).
         local manifest="${SCRIPT_DIR}/manifests/causa/deployment.yaml"
-        local tmp; tmp=$(mktemp /tmp/causa-$$-manifest-XXXXXX.yaml)
+        local tmp
+        if ! tmp=$(mktemp /tmp/causa-$$-manifest-XXXXXX.yaml); then
+            log_error "Failed to create temporary file for Causa Backend manifest"
+            return 1
+        fi
         sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
             -e "s/PLACEHOLDER_CLUSTER_TYPE/${INSTALL_TARGET:-kind}/g" \
             -e "s|image: .*causa-backend.*|image: ${img}|g" \
