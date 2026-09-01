@@ -16,7 +16,7 @@ lib/
   validator.sh                          ← pre-flight checks (tools, container runtime, cluster)
   install_kind_cluster.sh               ← Kind cluster + local registry (kind only)
   install_prometheus.sh                 ← Prometheus Stack via Helm (kind only)
-  install_cert_manager.sh               ← cert-manager via Helm (kind only, required by Jafra)
+  install_cert_manager.sh               ← cert-manager via official release manifest (kind only, required by Jafra)
   install_k8s_mcp.sh                    ← Kubernetes MCP Server
   install_jafra.sh                      ← Jafra Ecosystem (Controller + Analyzer + Agent)
   install_jafra_mcp.sh                  ← Jafra MCP Server

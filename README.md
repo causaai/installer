@@ -19,7 +19,7 @@ Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind
 - [`docker`](https://docs.docker.com/get-docker/) **or** [`podman`](https://podman.io/getting-started/installation) (rootful mode)
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
-- [`helm`](https://helm.sh/docs/intro/install/)
+- [`helm`](https://helm.sh/docs/intro/install/) — required only for the Prometheus Stack; cert-manager is installed from the official release manifest with `kubectl apply -f`
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
 > **Podman users:** the Podman machine must be started in rootful mode (`podman machine init --rootful`).
@@ -71,7 +71,7 @@ lib/
   validator.sh                # Pre-flight checks: CLI tools, container runtime, cluster
   install_kind_cluster.sh     # Kind cluster + local registry (kind only)
   install_prometheus.sh       # Prometheus Stack via Helm (kind only)
-  install_cert_manager.sh     # cert-manager via Helm (kind only, required by Jafra)
+  install_cert_manager.sh     # cert-manager via official release manifest (kind only, required by Jafra)
   install_k8s_mcp.sh          # Kubernetes MCP Server
   install_jafra.sh            # Jafra Ecosystem (Controller + Analyzer + Agent)
   install_jafra_mcp.sh        # Jafra MCP Server
