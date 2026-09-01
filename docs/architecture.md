@@ -86,6 +86,7 @@ onto the running deployment using `kubectl set env` (idempotent — safe on ever
 | `CAUSA_MCP_QUARKUS_ENDPOINT` | `http://mcp-metrics.<ns>.svc.cluster.local:8080` | Derived from `INSTALL_NAMESPACE` |
 | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` | user-supplied URL | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` env var (default: `""`) |
 | `CAUSA_MCP_ASYNC_PROFILER_ENDPOINT` | `http://jafra-mcp.<ns>.svc.cluster.local:8083` | Derived from `INSTALL_NAMESPACE` |
+| `JAFRA_ANALYZER_URL` | `http://jafra-analyzer.<ns>.svc.cluster.local:8080` | Derived from `INSTALL_NAMESPACE` |
 
 `kubectl set env` triggers a new rollout. The installer then waits up to 180 s for
 `kubectl rollout status deployment/causa-backend` to confirm the pods are running the

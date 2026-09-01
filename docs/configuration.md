@@ -49,6 +49,7 @@ The following two endpoints are derived automatically from `INSTALL_NAMESPACE` a
 |---|---|
 | `CAUSA_MCP_QUARKUS_ENDPOINT` | `http://mcp-metrics.<namespace>.svc.cluster.local:8080` |
 | `CAUSA_MCP_ASYNC_PROFILER_ENDPOINT` | `http://jafra-mcp.<namespace>.svc.cluster.local:8083` |
+| `JAFRA_ANALYZER_URL` | `http://jafra-analyzer.<namespace>.svc.cluster.local:8080` |
 
 ## Image overrides
 
