@@ -64,7 +64,7 @@ spec:
                 }
               )
             ) > 0.80
-            and on(namespace, pod)
+            and on(namespace, pod, container)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -73,8 +73,6 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
-            container: "{{ $labels.container }}"
-            pod: "{{ $labels.pod }}"
           annotations:
             summary: "High memory usage in pod {{ $labels.pod }} ({{ $value | humanizePercentage }})"
             description: >-
@@ -97,7 +95,7 @@ spec:
               reason="OOMKilled",
               namespace="PLACEHOLDER_NAMESPACE"
             } == 1
-            and on(namespace, pod)
+            and on(namespace, pod, container)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -106,8 +104,6 @@ spec:
           labels:
             severity: critical
             namespace: PLACEHOLDER_NAMESPACE
-            container: "{{ $labels.container }}"
-            pod: "{{ $labels.pod }}"
           annotations:
             summary: "Container OOMKilled: {{ $labels.container }} in pod {{ $labels.pod }}"
             description: >-
@@ -129,7 +125,7 @@ spec:
                 namespace="PLACEHOLDER_NAMESPACE"
               }[10m]
             ) > 2
-            and on(namespace, pod)
+            and on(namespace, pod, container)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -138,8 +134,6 @@ spec:
           labels:
             severity: critical
             namespace: PLACEHOLDER_NAMESPACE
-            container: "{{ $labels.container }}"
-            pod: "{{ $labels.pod }}"
           annotations:
             summary: "CrashLoopBackOff: pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 10m"
             description: >-
@@ -170,7 +164,7 @@ spec:
                 }[5m]
               )
             ) > 0.5
-            and on(namespace, pod)
+            and on(namespace, pod, container)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -179,8 +173,6 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
-            container: "{{ $labels.container }}"
-            pod: "{{ $labels.pod }}"
           annotations:
             summary: "CPU throttling {{ $value | humanizePercentage }} on container {{ $labels.container }} in pod {{ $labels.pod }}"
             description: >-
@@ -203,7 +195,7 @@ spec:
                 namespace="PLACEHOLDER_NAMESPACE"
               }[30m]
             ) > 5
-            and on(namespace, pod)
+            and on(namespace, pod, container)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -212,8 +204,6 @@ spec:
           labels:
             severity: warning
             namespace: PLACEHOLDER_NAMESPACE
-            container: "{{ $labels.container }}"
-            pod: "{{ $labels.pod }}"
           annotations:
             summary: "Frequent restarts: pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 30m"
             description: >-
