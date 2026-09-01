@@ -2,8 +2,6 @@
 
 Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind.sigs.k8s.io/) cluster in a single command.
 
-> **Scope:** Infrastructure only — Causa Backend and MCP servers.
-
 ## What gets installed
 
 | Component | NodePort |
@@ -14,12 +12,14 @@ Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind
 | Quarkus MCP Server | 30004 |
 | Causa MCP Server | 30005 |
 | PostgreSQL (pgvector) | — (ClusterIP) |
+| Jafra Ecosystem (Controller + Analyzer + Agent) | — (internal) |
 
 ## Prerequisites
 
 - [`docker`](https://docs.docker.com/get-docker/) **or** [`podman`](https://podman.io/getting-started/installation) (rootful mode)
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
+- [`helm`](https://helm.sh/docs/intro/install/) — required only for the Prometheus Stack; cert-manager is installed from the official release manifest with `kubectl apply -f`
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
 > **Podman users:** the Podman machine must be started in rootful mode (`podman machine init --rootful`).
@@ -43,29 +43,51 @@ cd installer
 ./install.sh --help
 ```
 
+## Target Quarkus app (Quarkus MCP metrics)
+
+The Causa Backend needs to know the URL of the Quarkus application being profiled.
+Set this before running the installer if you have a known target app:
+
+```bash
+export CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-namespace.svc.cluster.local:8080"
+./install.sh
+```
+
+If not set, the installer leaves this value empty — it can be updated later via:
+
+```bash
+# Replace causa-rca with your installation namespace if you used -n
+kubectl set env deployment/causa-backend -n causa-rca \
+  CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-namespace.svc.cluster.local:8080"
+```
+
 ## Repo layout
 
 ```
 install.sh          # Entry point — orchestrates all components
 lib/
-  images.env        # Default image tags (single source of truth)
-  logging.sh        # Logging helpers and spinner
-  install_utils.sh  # Shared helpers, manifest apply/delete, exit codes
-  validator.sh      # Pre-flight checks: CLI tools, container runtime, cluster
-  install_kind_cluster.sh   # Kind cluster + local registry
-  install_k8s_mcp.sh        # Kubernetes MCP Server
-  install_jafra_mcp.sh      # Jafra MCP Server
-  install_quarkus_mcp.sh    # Quarkus MCP Server
-  install_postgres.sh       # PostgreSQL + pgvector + secrets
-  install_causa.sh          # Causa Backend
-  install_causa_mcp.sh      # Causa MCP Server
+  images.env                  # Default image tags (single source of truth)
+  logging.sh                  # Logging helpers and spinner
+  install_utils.sh            # Shared helpers, manifest apply/delete, exit codes
+  validator.sh                # Pre-flight checks: CLI tools, container runtime, cluster
+  install_kind_cluster.sh     # Kind cluster + local registry (kind only)
+  install_prometheus.sh       # Prometheus Stack via Helm (kind only)
+  install_cert_manager.sh     # cert-manager via official release manifest (kind only, required by Jafra)
+  install_k8s_mcp.sh          # Kubernetes MCP Server
+  install_jafra.sh            # Jafra Ecosystem (Controller + Analyzer + Agent)
+  install_jafra_mcp.sh        # Jafra MCP Server
+  install_quarkus_mcp.sh      # Quarkus MCP Server
+  install_postgres.sh         # PostgreSQL + pgvector + secrets
+  install_causa.sh            # Causa Backend
+  install_causa_mcp.sh        # Causa MCP Server
 manifests/
-  k8s_mcp_server.yaml       # Kubernetes MCP Server (NodePort 30000)
-  causa/                    # Causa Backend (NodePort 30001)
-  jafra_mcp/                # Jafra MCP Server (NodePort 30003, Kind node only)
-  quarkus_mcp/              # Quarkus MCP Server (NodePort 30004)
-  causa_mcp/                # Causa MCP Server (NodePort 30005)
-  postgres/                 # PostgreSQL + pgvector (ClusterIP)
+  k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
+  causa/                      # Causa Backend (NodePort 30001)
+  jafra/                      # Jafra Ecosystem (Controller, Analyzer, Agent)
+  jafra_mcp/                  # Jafra MCP Server (NodePort 30003, Kind node only)
+  quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
+  causa_mcp/                  # Causa MCP Server (NodePort 30005)
+  postgres/                   # PostgreSQL + pgvector (ClusterIP)
 ```
 
 ## Documentation
