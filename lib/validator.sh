@@ -478,6 +478,60 @@ validate_prometheus_available() {
 }
 
 export -f validate_prerequisites
+
+################################################################################
+# validate_cert_manager_with_prompt
+# Checks that cert-manager pods are present and running (OpenShift only).
+# Prints actionable install instructions to the terminal when missing.
+################################################################################
+validate_cert_manager_with_prompt() {
+    log_file_only "Validating Cert Manager"
+
+    # Only enforce on OpenShift — kind installs cert-manager itself in step 3.
+    if [[ "${INSTALL_TARGET:-kind}" != "openshift" ]]; then
+        write_to_log_file "INFO" "Skipping cert-manager pre-req check on non-OpenShift target (${INSTALL_TARGET:-kind})"
+        return 0
+    fi
+
+    log_file_only "Checking for Cert Manager installation..."
+
+    # Count cert-manager pods across all namespaces.
+    local cert_manager_pods
+    cert_manager_pods=$(${KUBE_CLI} get pods -A 2>/dev/null | grep cert-manager | wc -l | tr -d '[:space:]')
+
+    # Guard against non-numeric output (e.g. kubectl unavailable).
+    if [[ ! "${cert_manager_pods}" =~ ^[0-9]+$ ]]; then
+        cert_manager_pods="0"
+    fi
+
+    if [[ "${cert_manager_pods}" -eq 0 ]]; then
+        log_error "Cert Manager is not installed in the cluster"
+        {
+            echo -e "${COLOR_RED}[ERROR] Cert Manager is not installed in the cluster${COLOR_RESET}"
+            echo -e "${COLOR_RED}Cert Manager is required for Cryostat operator installation${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_RED}To install Cert Manager, run:${COLOR_RESET}"
+            echo -e "${COLOR_RED}  ${KUBE_CLI} apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_RED}After installing Cert Manager, please rerun this installer${COLOR_RESET}"
+            echo ""
+        } >/dev/tty 2>/dev/null || true
+        return 1
+    fi
+
+    # Derive the namespace from the first cert-manager pod for logging only.
+    local cert_manager_namespace
+    cert_manager_namespace=$(${KUBE_CLI} get pods -A 2>/dev/null \
+        | grep cert-manager | head -n 1 | awk '{print $1}' | tr -d '[:space:]')
+
+    log_validation_success "Validating Cert Manager"
+    log_file_only "Namespace: ${cert_manager_namespace}"
+    log_file_only "Running pods: ${cert_manager_pods}"
+
+    return 0
+}
+
+export -f validate_cert_manager_with_prompt
 export -f validate_docker_running
 export -f validate_cluster_access
 export -f validate_image_format_silent

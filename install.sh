@@ -265,6 +265,17 @@ main() {
         exit 1
     fi
 
+    # OpenShift pre-req: cert-manager must be present before any component runs.
+    # Placed here — after validate_prerequisites confirms oc/kubectl is available
+    # but before any cluster-side work — so a missing cert-manager is caught as
+    # early as possible in the validation section.
+    if _is_openshift_target; then
+        if ! validate_cert_manager_with_prompt; then
+            log_error "cert-manager pre-req check failed"
+            exit 1
+        fi
+    fi
+
     # kind-only pre-flight: persist the detected runtime and cluster settings so
     # that an uninstall invocation without the original env vars targets the
     # correct Kind cluster and container daemon.
