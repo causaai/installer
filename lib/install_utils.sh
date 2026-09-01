@@ -269,7 +269,7 @@ apply_manifest() {
         return 1
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
 
     # Namespace and cluster-type substitution
     sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
@@ -308,7 +308,7 @@ delete_manifest() {
         return 0
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
     sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${manifest}" > "${tmp}"
 
     ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
