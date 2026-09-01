@@ -32,6 +32,8 @@ spec:
               value: "8083"
             - name: QUARKUS_HTTP_PORT
               value: "8083"
+            - name: JAFRA_ANALYZER_URL
+              value: "http://jafra-analyzer.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080"
           livenessProbe:
             httpGet:
               path: /q/health/live
