@@ -49,6 +49,7 @@ export CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-namespace.svc.cluste
 If you leave it unset, the installer stamps an empty value that can be updated at any time:
 
 ```bash
+# Replace causa-rca with your installation namespace if you used -n
 kubectl set env deployment/causa-backend -n causa-rca \
   CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-namespace.svc.cluster.local:8080"
 ```
