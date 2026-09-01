@@ -122,7 +122,13 @@ alertmanager:
 
 prometheus:
   prometheusSpec:
-    # Pick up PrometheusRule resources from all namespaces
+    # Pick up PrometheusRule resources from all namespaces.
+    # ruleSelectorNilUsesHelmValues defaults to true, under which the chart
+    # treats an empty ruleSelector: {} as "use ruleSelector: {matchLabels:
+    # {release: <helm-release-name>}}" instead of "select everything" — so
+    # without disabling it here, causa-rca-alerts (which has no `release`
+    # label) is silently never loaded by Prometheus.
+    ruleSelectorNilUsesHelmValues: false
     ruleNamespaceSelector: {}
     ruleSelector: {}
     resources:
@@ -141,6 +147,13 @@ grafana:
   enabled: false
 kubeStateMetrics:
   enabled: true
+# kube-state-metrics does not expose kube_pod_labels at all unless a label
+# allowlist is configured — with no allowlist the metric has zero series,
+# so any PromQL rule joining on kube_pod_labels (e.g. the causa.ai/monitoring
+# opt-in filter) silently matches nothing, no matter what labels pods carry.
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - "pods=[causa.ai/monitoring]"
 nodeExporter:
   enabled: false
 prometheusOperator:
