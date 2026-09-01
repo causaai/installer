@@ -43,6 +43,14 @@ MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
 
 # State file — persists values that must survive across separate invocations
 # (e.g. install vs. uninstall).  Written by main(), read by uninstall_main().
+# Keys written:
+#   CONTAINER_RUNTIME          — docker|podman (kind target only)
+#   KIND_CLUSTER_NAME          — cluster name used at install time (kind target only)
+#   KIND_REGISTRY_NAME         — registry container name (kind target only)
+#   KIND_REGISTRY_PORT         — local registry port (kind target only)
+#   JAFRA_INSTALLED            — true if Jafra Ecosystem was successfully installed
+#   JAFRA_MCP_INSTALLED        — true if Jafra MCP Server was successfully installed
+#   QUARKUS_MCP_INSTALLED      — true if Quarkus MCP Server was successfully installed
 INSTALLER_STATE_FILE="${SCRIPT_DIR}/.causa-rca-state"
 
 # Namespace where all RCA components are deployed
@@ -257,13 +265,17 @@ main() {
         exit 1
     fi
 
-    # kind-only pre-flight: persist the detected runtime (so uninstall targets
-    # the same daemon) and verify the runtime daemon is actually reachable.
+    # kind-only pre-flight: persist the detected runtime and cluster settings so
+    # that an uninstall invocation without the original env vars targets the
+    # correct Kind cluster and container daemon.
     if _is_kind_target; then
         {
             echo "CONTAINER_RUNTIME=${CONTAINER_RUNTIME}"
+            echo "KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME}"
+            echo "KIND_REGISTRY_NAME=${KIND_REGISTRY_NAME}"
+            echo "KIND_REGISTRY_PORT=${KIND_REGISTRY_PORT}"
         } > "${INSTALLER_STATE_FILE}"
-        write_to_log_file "INFO" "Container runtime persisted: ${CONTAINER_RUNTIME} (${INSTALLER_STATE_FILE})"
+        write_to_log_file "INFO" "Installer state persisted: runtime=${CONTAINER_RUNTIME} cluster=${KIND_CLUSTER_NAME} (${INSTALLER_STATE_FILE})"
 
         if ! validate_docker_running; then
             log_error "Docker is not running"
@@ -456,12 +468,12 @@ uninstall_main() {
         if [[ -f "${INSTALLER_STATE_FILE}" ]]; then
             # shellcheck source=/dev/null
             source "${INSTALLER_STATE_FILE}"
-            write_to_log_file "INFO" "Container runtime restored from state file: ${CONTAINER_RUNTIME}"
+            write_to_log_file "INFO" "Installer state restored: runtime=${CONTAINER_RUNTIME} cluster=${KIND_CLUSTER_NAME} (${INSTALLER_STATE_FILE})"
         else
             CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-            write_to_log_file "WARN" "State file not found (${INSTALLER_STATE_FILE}); defaulting to ${CONTAINER_RUNTIME}"
+            write_to_log_file "WARN" "State file not found (${INSTALLER_STATE_FILE}); using current env (cluster=${KIND_CLUSTER_NAME}, runtime=${CONTAINER_RUNTIME})"
         fi
-        export CONTAINER_RUNTIME
+        export CONTAINER_RUNTIME KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
         # Switch kubectl to the Kind context before any delete calls.
         # Without this, a leftover OpenShift/other context causes every kubectl
         # delete to hang for the full API-server timeout before giving up.

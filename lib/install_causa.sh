@@ -99,8 +99,14 @@ install_causa() {
     local img="${CAUSA_BACKEND_IMAGE}"
     write_to_log_file "INFO" "Using image: ${img}"
 
-    # Resolve the quarkus metrics base URL placeholder value (may be empty)
+    # Resolve the quarkus metrics base URL placeholder value (may be empty).
+    # Escape characters that are special in a sed replacement string so that
+    # URLs containing '&', '\', or the '|' delimiter are not corrupted.
     local quarkus_metrics_base_url="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
+    # Escape backslashes first (must be first), then '&', then the delimiter '|'.
+    local quarkus_metrics_base_url_escaped="${quarkus_metrics_base_url//\\/\\\\}"
+    quarkus_metrics_base_url_escaped="${quarkus_metrics_base_url_escaped//&/\\&}"
+    quarkus_metrics_base_url_escaped="${quarkus_metrics_base_url_escaped//|/\\|}"
 
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa-backend"
@@ -110,7 +116,7 @@ install_causa() {
         # configmap contains PLACEHOLDER_NAMESPACE and PLACEHOLDER_QUARKUS_METRICS_BASE_URL
         local tmp_cm; tmp_cm=$(mktemp /tmp/causa-$$-configmap-XXXXXX.yaml)
         sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
-            -e "s|PLACEHOLDER_QUARKUS_METRICS_BASE_URL|${quarkus_metrics_base_url}|g" \
+            -e "s|PLACEHOLDER_QUARKUS_METRICS_BASE_URL|${quarkus_metrics_base_url_escaped}|g" \
             "${ocp_dir}/configmap.yaml" > "${tmp_cm}"
         if ! ${KUBE_CLI} apply -f "${tmp_cm}" >>"${LOG_FILE}" 2>&1; then
             rm -f "${tmp_cm}"
@@ -157,7 +163,7 @@ install_causa() {
         sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
             -e "s/PLACEHOLDER_CLUSTER_TYPE/${INSTALL_TARGET:-kind}/g" \
             -e "s|image: .*causa-backend.*|image: ${img}|g" \
-            -e "s|PLACEHOLDER_QUARKUS_METRICS_BASE_URL|${quarkus_metrics_base_url}|g" \
+            -e "s|PLACEHOLDER_QUARKUS_METRICS_BASE_URL|${quarkus_metrics_base_url_escaped}|g" \
             "${manifest}" > "${tmp}"
         if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
             rm -f "${tmp}"

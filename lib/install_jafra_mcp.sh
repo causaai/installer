@@ -71,11 +71,8 @@ uninstall_jafra_mcp() {
         return 0
     fi
 
-    if _jafra_mcp_not_released; then
-        write_to_log_file "INFO" "Jafra MCP Server: image not released — nothing to uninstall"
-        return 0
-    fi
-
+    # Always attempt deletion; delete_manifest uses --ignore-not-found=true so
+    # this is safe even when the component was never deployed.
     local manifest; manifest=$(_jafra_mcp_manifest)
     delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
 

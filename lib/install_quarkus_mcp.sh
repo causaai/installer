@@ -71,11 +71,8 @@ uninstall_quarkus_mcp() {
         return 0
     fi
 
-    if _quarkus_mcp_not_released; then
-        write_to_log_file "INFO" "Quarkus MCP Server: image not released — nothing to uninstall"
-        return 0
-    fi
-
+    # Always attempt deletion; delete_manifest uses --ignore-not-found=true so
+    # this is safe even when the component was never deployed.
     local manifest="${SCRIPT_DIR}/manifests/quarkus_mcp/deployment.yaml"
     delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
 
