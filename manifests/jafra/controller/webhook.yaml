@@ -19,7 +19,6 @@ webhooks:
           operator: NotIn
           values:
             - kube-system
-            - PLACEHOLDER_NAMESPACE
     clientConfig:
       service:
         name: jafra-controller

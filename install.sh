@@ -43,6 +43,14 @@ MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
 
 # State file — persists values that must survive across separate invocations
 # (e.g. install vs. uninstall).  Written by main(), read by uninstall_main().
+# Keys written:
+#   CONTAINER_RUNTIME          — docker|podman (kind target only)
+#   KIND_CLUSTER_NAME          — cluster name used at install time (kind target only)
+#   KIND_REGISTRY_NAME         — registry container name (kind target only)
+#   KIND_REGISTRY_PORT         — local registry port (kind target only)
+#   JAFRA_INSTALLED            — true if Jafra Ecosystem was successfully installed
+#   JAFRA_MCP_INSTALLED        — true if Jafra MCP Server was successfully installed
+#   QUARKUS_MCP_INSTALLED      — true if Quarkus MCP Server was successfully installed
 INSTALLER_STATE_FILE="${SCRIPT_DIR}/.causa-rca-state"
 
 # Namespace where all RCA components are deployed
@@ -71,6 +79,11 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-causa-rca}"
 KIND_REGISTRY_NAME="${KIND_REGISTRY_NAME:-causa-rca-registry}"
 KIND_REGISTRY_PORT="${KIND_REGISTRY_PORT:-5001}"
 export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
+
+# Configurable endpoint for the Quarkus app under analysis (used by Causa Backend)
+# Override via: export CAUSA_MCP_QUARKUS_METRICS_BASE_URL="http://my-app.my-ns.svc.cluster.local:8080"
+CAUSA_MCP_QUARKUS_METRICS_BASE_URL="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
+export CAUSA_MCP_QUARKUS_METRICS_BASE_URL
 
 # Image variables (populated by images.env; can be overridden via CLI flags)
 K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
@@ -168,43 +181,10 @@ _is_openshift_target() {
 }
 
 ################################################################################
-# _install_kind_components — Steps 4-9 (kind target only)
-# OpenShift support for each step lands in its own follow-on PR.
+# _install_kind_only_components — kind-target-only steps (cert-manager path,
+# PostgreSQL Deployment, Causa Backend, Causa MCP)
 ################################################################################
-_install_kind_components() {
-    # ── Step 4: Jafra Ecosystem (Controller) ─────────────────────────────────
-    start_spinner "Installing Jafra Ecosystem..."
-    if ! install_jafra; then
-        stop_spinner
-        log_warn "Jafra Ecosystem installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Jafra Ecosystem"
-        installed_components+=("Jafra Ecosystem")
-    fi
-
-    # ── Step 5: Jafra MCP Server ─────────────────────────────────────────────
-    start_spinner "Installing Jafra MCP Server..."
-    if ! install_jafra_mcp; then
-        stop_spinner
-        log_warn "Jafra MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Jafra MCP Server"
-        installed_components+=("Jafra MCP Server")
-    fi
-
-    # ── Step 6: Quarkus MCP Server ───────────────────────────────────────────
-    start_spinner "Installing Quarkus MCP Server..."
-    if ! install_quarkus_mcp; then
-        stop_spinner
-        log_warn "Quarkus MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Quarkus MCP Server"
-        installed_components+=("Quarkus MCP Server")
-    fi
-
+_install_kind_only_components() {
     # ── Step 7: PostgreSQL ───────────────────────────────────────────────────
     start_spinner "Installing PostgreSQL..."
     if ! install_postgres; then
@@ -240,24 +220,12 @@ _install_kind_components() {
 }
 
 ################################################################################
-# _uninstall_kind_components — teardown for kind-only components
+# _uninstall_kind_only_components — teardown for kind-only components
 ################################################################################
-_uninstall_kind_components() {
+_uninstall_kind_only_components() {
     start_spinner "Uninstalling Causa MCP Server..."
     uninstall_causa_mcp
     stop_spinner; log_uninstall_success "Causa MCP Server"
-
-    start_spinner "Uninstalling Quarkus MCP Server..."
-    uninstall_quarkus_mcp
-    stop_spinner; log_uninstall_success "Quarkus MCP Server"
-
-    start_spinner "Uninstalling Jafra MCP Server..."
-    uninstall_jafra_mcp
-    stop_spinner; log_uninstall_success "Jafra MCP Server"
-
-    start_spinner "Uninstalling Jafra Ecosystem..."
-    uninstall_jafra
-    stop_spinner; log_uninstall_success "Jafra Ecosystem"
 
     start_spinner "Uninstalling cert-manager..."
     uninstall_cert_manager
@@ -297,13 +265,28 @@ main() {
         exit 1
     fi
 
-    # kind-only pre-flight: persist the detected runtime (so uninstall targets
-    # the same daemon) and verify the runtime daemon is actually reachable.
+    # OpenShift pre-req: cert-manager must be present before any component runs.
+    # Placed here — after validate_prerequisites confirms oc/kubectl is available
+    # but before any cluster-side work — so a missing cert-manager is caught as
+    # early as possible in the validation section.
+    if _is_openshift_target; then
+        if ! validate_cert_manager_with_prompt; then
+            log_error "cert-manager pre-req check failed"
+            exit 1
+        fi
+    fi
+
+    # kind-only pre-flight: persist the detected runtime and cluster settings so
+    # that an uninstall invocation without the original env vars targets the
+    # correct Kind cluster and container daemon.
     if _is_kind_target; then
         {
             echo "CONTAINER_RUNTIME=${CONTAINER_RUNTIME}"
+            echo "KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME}"
+            echo "KIND_REGISTRY_NAME=${KIND_REGISTRY_NAME}"
+            echo "KIND_REGISTRY_PORT=${KIND_REGISTRY_PORT}"
         } > "${INSTALLER_STATE_FILE}"
-        write_to_log_file "INFO" "Container runtime persisted: ${CONTAINER_RUNTIME} (${INSTALLER_STATE_FILE})"
+        write_to_log_file "INFO" "Installer state persisted: runtime=${CONTAINER_RUNTIME} cluster=${KIND_CLUSTER_NAME} (${INSTALLER_STATE_FILE})"
 
         if ! validate_docker_running; then
             log_error "Docker is not running"
@@ -388,10 +371,45 @@ main() {
     log_install_success "Kubernetes MCP Server"
     installed_components+=("Kubernetes MCP Server")
 
-    _is_kind_target && _install_kind_components
+    # ── Step 5: Jafra Ecosystem (Controller + Analyzer + Agent) ─────────────
+    start_spinner "Installing Jafra Ecosystem..."
+    if ! install_jafra; then
+        stop_spinner
+        log_warn "Jafra Ecosystem installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Jafra Ecosystem"
+        installed_components+=("Jafra Ecosystem")
+    fi
 
-    # ── Steps 7-9: PostgreSQL + Causa Backend + Causa MCP (openshift target) ─
-    if _is_openshift_target; then
+    # ── Step 6: Jafra MCP Server ─────────────────────────────────────────────
+    start_spinner "Installing Jafra MCP Server..."
+    if ! install_jafra_mcp; then
+        stop_spinner
+        log_warn "Jafra MCP Server installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Jafra MCP Server"
+        installed_components+=("Jafra MCP Server")
+    fi
+
+    # ── Step 7: Quarkus MCP Server ───────────────────────────────────────────
+    start_spinner "Installing Quarkus MCP Server..."
+    if ! install_quarkus_mcp; then
+        stop_spinner
+        log_warn "Quarkus MCP Server installation skipped or failed"
+    else
+        stop_spinner
+        log_install_success "Quarkus MCP Server"
+        installed_components+=("Quarkus MCP Server")
+    fi
+
+    # ── Steps 8-10: PostgreSQL + Causa Backend + Causa MCP ───────────────────
+    # On kind these run via _install_kind_only_components (standalone PG Deployment).
+    # On OpenShift they run directly (CNPG operator + OCP Route variants).
+    if _is_kind_target; then
+        _install_kind_only_components
+    else
         start_spinner "Installing PostgreSQL..."
         if ! install_postgres; then
             stop_spinner
@@ -440,8 +458,7 @@ main() {
 
     post_component_validation "${elapsed}"
 
-    # ── Port-forward instructions ────────────────────────────────────────────
-    _print_access_summary
+    _print_log_summary
 
     write_to_log_file "SUCCESS" "Installation completed in ${elapsed}"
     if [[ -n "${LOG_FILE:-}" ]]; then
@@ -464,15 +481,41 @@ uninstall_main() {
         if [[ -f "${INSTALLER_STATE_FILE}" ]]; then
             # shellcheck source=/dev/null
             source "${INSTALLER_STATE_FILE}"
-            write_to_log_file "INFO" "Container runtime restored from state file: ${CONTAINER_RUNTIME}"
+            write_to_log_file "INFO" "Installer state restored: runtime=${CONTAINER_RUNTIME} cluster=${KIND_CLUSTER_NAME} (${INSTALLER_STATE_FILE})"
         else
             CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
-            write_to_log_file "WARN" "State file not found (${INSTALLER_STATE_FILE}); defaulting to ${CONTAINER_RUNTIME}"
+            write_to_log_file "WARN" "State file not found (${INSTALLER_STATE_FILE}); using current env (cluster=${KIND_CLUSTER_NAME}, runtime=${CONTAINER_RUNTIME})"
         fi
-        export CONTAINER_RUNTIME
+        export CONTAINER_RUNTIME KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
+        # Switch kubectl to the Kind context before any delete calls.
+        # Without this, a leftover OpenShift/other context causes every kubectl
+        # delete to hang for the full API-server timeout before giving up.
+        local kind_ctx="kind-${KIND_CLUSTER_NAME}"
+        if ${KUBE_CLI} config get-contexts "${kind_ctx}" &>/dev/null; then
+            ${KUBE_CLI} config use-context "${kind_ctx}" >>"${LOG_FILE}" 2>&1 || true
+            write_to_log_file "INFO" "Switched kubectl context to ${kind_ctx} for uninstall"
+        else
+            write_to_log_file "WARN" "Kind context '${kind_ctx}' not found — kubectl may target the wrong cluster"
+        fi
     fi
 
-    _is_kind_target && _uninstall_kind_components
+    # Uninstall Quarkus MCP, Jafra MCP, and Jafra Ecosystem (all targets)
+    start_spinner "Uninstalling Quarkus MCP Server..."
+    uninstall_quarkus_mcp
+    stop_spinner; log_uninstall_success "Quarkus MCP Server"
+
+    start_spinner "Uninstalling Jafra MCP Server..."
+    uninstall_jafra_mcp
+    stop_spinner; log_uninstall_success "Jafra MCP Server"
+
+    start_spinner "Uninstalling Jafra Ecosystem..."
+    uninstall_jafra
+    stop_spinner; log_uninstall_success "Jafra Ecosystem"
+
+    # kind-only teardown (cert-manager, Causa Backend, Causa MCP, PostgreSQL Deployment)
+    if _is_kind_target; then
+        _uninstall_kind_only_components
+    fi
 
     start_spinner "Uninstalling Kubernetes MCP Server..."
     if ! uninstall_kubernetes_mcp_server; then
@@ -540,51 +583,20 @@ uninstall_main() {
 }
 
 ################################################################################
-# _print_access_summary
+# _print_log_summary — print log file path on installer completion
 ################################################################################
-_print_access_summary() {
-    local backend_url mcp_url
-
-    if _is_openshift_target; then
-        # Fetch the hostnames assigned by the OpenShift ingress controller.
-        local backend_host mcp_host
-        backend_host=$(${KUBE_CLI} get route causa-backend \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.spec.host}' 2>/dev/null || true)
-        mcp_host=$(${KUBE_CLI} get route causa-mcp \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.spec.host}' 2>/dev/null || true)
-
-        if [[ -n "${backend_host}" ]]; then
-            backend_url="https://${backend_host}/api/v1/diagnostics"
-        else
-            backend_url="(route host not yet available — run: ${KUBE_CLI} get route causa-backend -n ${INSTALL_NAMESPACE})"
-        fi
-
-        if [[ -n "${mcp_host}" ]]; then
-            mcp_url="https://${mcp_host}/mcp"
-        else
-            mcp_url="(route host not yet available — run: ${KUBE_CLI} get route causa-mcp -n ${INSTALL_NAMESPACE})"
-        fi
-    else
-        backend_url="http://localhost:30001/api/v1/diagnostics"
-        mcp_url="http://localhost:30005/mcp"
+_print_log_summary() {
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        {
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Installation Log${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Log file:${COLOR_RESET} ${LOG_FILE}"
+            echo ""
+        } >/dev/tty 2>/dev/null || true
     fi
-
-    {
-        echo ""
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}Access Summary${COLOR_RESET}"
-        echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
-        echo ""
-        echo -e "${COLOR_GREEN}Causa Backend API  :${COLOR_RESET}  ${backend_url}"
-        echo -e "${COLOR_GREEN}Causa MCP Server   :${COLOR_RESET}  ${mcp_url}"
-        echo ""
-        if [[ -n "${LOG_FILE:-}" ]]; then
-            echo -e "${COLOR_CYAN}Log file:${COLOR_RESET} ${LOG_FILE}"
-        fi
-        echo ""
-    } >/dev/tty 2>/dev/null || true
 }
 
 ################################################################################
@@ -628,6 +640,9 @@ show_usage() {
     echo "    TERMINATE=true                Uninstall mode"
     echo "    PROMETHEUS_NAMESPACE=NAME     Namespace for kube-prometheus-stack (default: monitoring)"
     echo "    DELETE_CLUSTER=true           Delete cluster on --terminate"
+    echo "    CAUSA_MCP_QUARKUS_METRICS_BASE_URL=URL"
+    echo "                                  Base URL of the Quarkus app under analysis"
+    echo "                                  (e.g. http://my-app.default.svc.cluster.local:8080)"
     echo ""
     echo "EXAMPLES:"
     echo "    # Full install on Kind (creates cluster + all components)"

@@ -373,10 +373,16 @@ stop_spinner() {
 }
 
 ################################################################################
-# _spinner_cleanup_trap — internal handler, stops the spinner on signal
+# _spinner_cleanup_trap — internal handler, stops the spinner on signal.
+# After cleaning up the spinner, re-raises the signal with default behaviour so
+# the parent script actually terminates instead of silently continuing.
 ################################################################################
 _spinner_cleanup_trap() {
+    local sig="${1:-INT}"
     stop_spinner
+    # Reset to default and re-raise so the script exits with the correct signal.
+    trap - "${sig}"
+    kill -s "${sig}" "$$"
 }
 
 ################################################################################
@@ -385,7 +391,8 @@ _spinner_cleanup_trap() {
 # library. Not called automatically to avoid overriding callers' own traps.
 ################################################################################
 enable_spinner_trap() {
-    trap '_spinner_cleanup_trap' INT TERM
+    trap '_spinner_cleanup_trap INT'  INT
+    trap '_spinner_cleanup_trap TERM' TERM
 }
 
 ################################################################################

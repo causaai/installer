@@ -334,13 +334,8 @@ uninstall_jafra() {
         return 0
     fi
 
-    if [[ -z "${JAFRA_CONTROLLER_IMAGE:-}" ]] && \
-       [[ -z "${JAFRA_ANALYZER_IMAGE:-}" ]] && \
-       [[ -z "${JAFRA_AGENT_IMAGE:-}" ]]; then
-        write_to_log_file "INFO" "Jafra: images not configured — nothing to uninstall"
-        return 0
-    fi
-
+    # Always attempt deletion of all Jafra sub-components; each delete_manifest
+    # call uses --ignore-not-found=true so this is safe when nothing was deployed.
     uninstall_jafra_agent
     uninstall_jafra_analyzer
     uninstall_jafra_controller
