@@ -126,7 +126,7 @@ prometheus:
     # ruleSelectorNilUsesHelmValues defaults to true, under which the chart
     # treats an empty ruleSelector: {} as "use ruleSelector: {matchLabels:
     # {release: <helm-release-name>}}" instead of "select everything" — so
-    # without disabling it here, causa-rca-alerts (which has no `release`
+    # without disabling it here, causa-rca-alerts (which has no release
     # label) is silently never loaded by Prometheus.
     ruleSelectorNilUsesHelmValues: false
     ruleNamespaceSelector: {}
