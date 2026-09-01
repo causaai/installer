@@ -38,7 +38,7 @@ spec:
     - name: causa-rca.rules
       # Evaluate every 15 minutes — aligned with the Causa Backend cooldown period
       # so a re-fired alert is not sent before the previous RCA has completed.
-      interval: 15m
+      interval: 30s
       rules:
 
         # ── High Memory Usage ──────────────────────────────────────────────
@@ -69,7 +69,6 @@ spec:
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
-          for: 2m
           labels:
             severity: warning
           annotations:
@@ -99,7 +98,6 @@ spec:
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
-          for: 0m
           labels:
             severity: critical
           annotations:
@@ -166,7 +164,6 @@ spec:
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
-          for: 2m
           labels:
             severity: warning
           annotations:
@@ -196,7 +193,6 @@ spec:
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
-          for: 0m
           labels:
             severity: warning
           annotations:
