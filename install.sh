@@ -458,6 +458,8 @@ main() {
 
     post_component_validation "${elapsed}"
 
+    _print_log_summary
+
     write_to_log_file "SUCCESS" "Installation completed in ${elapsed}"
     if [[ -n "${LOG_FILE:-}" ]]; then
         write_to_log_file "INFO" "Log: ${LOG_FILE}"
@@ -578,6 +580,23 @@ uninstall_main() {
         echo ""
     } >/dev/tty 2>/dev/null || true
     exit 0
+}
+
+################################################################################
+# _print_log_summary — print log file path on installer completion
+################################################################################
+_print_log_summary() {
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        {
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Installation Log${COLOR_RESET}"
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
+            echo ""
+            echo -e "${COLOR_CYAN}${COLOR_BOLD}Log file:${COLOR_RESET} ${LOG_FILE}"
+            echo ""
+        } >/dev/tty 2>/dev/null || true
+    fi
 }
 
 ################################################################################
