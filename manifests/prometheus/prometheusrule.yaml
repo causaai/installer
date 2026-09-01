@@ -64,7 +64,7 @@ spec:
                 }
               )
             ) > 0.80
-            and on(namespace, pod, container)
+            and on(namespace, pod)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -95,7 +95,7 @@ spec:
               reason="OOMKilled",
               namespace="PLACEHOLDER_NAMESPACE"
             } == 1
-            and on(namespace, pod, container)
+            and on(namespace, pod)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -125,7 +125,7 @@ spec:
                 namespace="PLACEHOLDER_NAMESPACE"
               }[10m]
             ) > 2
-            and on(namespace, pod, container)
+            and on(namespace, pod)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -164,7 +164,7 @@ spec:
                 }[5m]
               )
             ) > 0.5
-            and on(namespace, pod, container)
+            and on(namespace, pod)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
@@ -195,7 +195,7 @@ spec:
                 namespace="PLACEHOLDER_NAMESPACE"
               }[30m]
             ) > 5
-            and on(namespace, pod, container)
+            and on(namespace, pod)
             kube_pod_labels{
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
