@@ -93,7 +93,7 @@ install_causa_mcp() {
         fi
         write_to_log_file "INFO" "OpenShift Route applied for Causa MCP Server"
     else
-        write_to_log_file "INFO" "NodePort: localhost:30005"
+        write_to_log_file "INFO" "Host access: kubectl port-forward svc/causa-mcp 30005:8081 -n ${INSTALL_NAMESPACE}"
     fi
 
     write_to_log_file "SUCCESS" "Causa MCP Server installed"

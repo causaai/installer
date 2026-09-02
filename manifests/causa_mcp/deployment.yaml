@@ -60,12 +60,13 @@ metadata:
   labels:
     app: causa-mcp
 spec:
-  type: NodePort
+  # ClusterIP: reached from the host via `kubectl port-forward`,
+  # not a NodePort host mapping.
+  type: ClusterIP
   ports:
     - port: 8081
       targetPort: 8081
       protocol: TCP
       name: http
-      nodePort: 30005
   selector:
     app: causa-mcp

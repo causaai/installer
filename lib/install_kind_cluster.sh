@@ -82,9 +82,10 @@ _start_local_registry() {
 }
 
 # _check_ports_available — fails with a clear message if any required host port is in use.
-# Only checks the four host-mapped Kind node ports (30000, 30001, 30004, 30005). Port 30003
-# (Jafra MCP) has no hostPort mapping and is not bound on the host. Registry port is
-# excluded because _start_local_registry runs first and manages it idempotently.
+# Only checks the two host-mapped Kind node ports (30000, 30004). Ports 30001 (Causa
+# Backend), 30003 (Jafra MCP) and 30005 (Causa MCP) have no hostPort mapping and are not
+# bound on the host — Causa Backend/MCP are reached via `kubectl port-forward`. Registry
+# port is excluded because _start_local_registry runs first and manages it idempotently.
 #
 # gvproxy / rootlessport stale-lease exception (Linux rootless Podman only):
 #   After all containers that owned a port mapping are removed, gvproxy keeps the
@@ -94,7 +95,7 @@ _start_local_registry() {
 #   gvproxy/rootlessport AND no running container is currently publishing that port —
 #   confirming it is truly a stale lease rather than an active conflict.
 _check_ports_available() {
-    local ports=(30000 30001 30004 30005)
+    local ports=(30000 30004)
     local blocked=()
     local runtime="${CONTAINER_RUNTIME:-docker}"
 
@@ -158,18 +159,16 @@ kubeadmConfigPatches:
 nodes:
   - role: control-plane
     image: kindest/node:v1.31.14
+    # causa-backend (8080) and causa-mcp (8081) are ClusterIP services reached
+    # from the host via `kubectl port-forward` (see demo.sh), so they get no
+    # host mapping here.  Only the k8s-mcp (30000) and quarkus-mcp (30004)
+    # NodePorts are published to the host.
     extraPortMappings:
       - containerPort: 30000
         hostPort: 30000
         protocol: TCP
-      - containerPort: 30001
-        hostPort: 30001
-        protocol: TCP
       - containerPort: 30004
         hostPort: 30004
-        protocol: TCP
-      - containerPort: 30005
-        hostPort: 30005
         protocol: TCP
 EOF
     echo "${config_file}"
@@ -451,7 +450,7 @@ uninstall_kind_cluster() {
     if [[ -n "${node_containers}" ]]; then
         write_to_log_file "INFO" "Force-removing Kind node containers to release host ports..."
         echo "${node_containers}" | xargs ${runtime} rm -f >>"${LOG_FILE}" 2>&1 || true
-        write_to_log_file "SUCCESS" "Kind node containers removed (ports 30000/30001/30004/30005 freed)"
+        write_to_log_file "SUCCESS" "Kind node containers removed (ports 30000/30004 freed)"
     fi
 
     # ── Step 3: Delete the cluster record from kind's bookkeeping ─────────────
