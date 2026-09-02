@@ -371,6 +371,13 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: causa-mcp
+      ports:
+        - protocol: TCP
+          port: 8080
 EOF
 
     if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
