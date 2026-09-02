@@ -88,8 +88,6 @@ install_quarkus_mcp() {
     write_to_log_file "SUCCESS" "Quarkus MCP Server installed"
 
     # On OpenShift expose via a Route.
-    # Fix (comment 1): on Route apply failure, delete the already-applied
-    # deployment manifest so no partial install is left behind.
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local route="${SCRIPT_DIR}/manifests/openshift/quarkus-mcp-route.yaml"
         if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
