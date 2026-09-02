@@ -81,16 +81,26 @@ alertmanager:
     global:
       resolve_timeout: 5m
     route:
-      # Send all alerts to the causa-webhook receiver by default
-      receiver: causa-webhook
-      # Group by pod so each affected pod fires its alert independently
-      # rather than batching all pods in the namespace into one notification.
+      # Default: everything not explicitly matched below goes nowhere —
+      # only Causa's own PrometheusRule alerts (see child route) reach the webhook.
+      receiver: "null"
       group_by: ['namespace', 'alertname', 'pod']
-      group_wait: 10s
-      group_interval: 1m
-      # 15m matches the Causa Backend cooldown period — ensures the same alert
-      # is not re-sent before a previous RCA has had time to complete.
-      repeat_interval: 15m
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      routes:
+        # Only alerts fired by Causa's PrometheusRule (CausaApp*) go to the webhook.
+        - matchers:
+            - alertname =~ "CausaApp.*"
+          receiver: causa-webhook
+          # Group by pod so each affected pod fires its alert independently
+          # rather than batching all pods in the namespace into one notification.
+          group_by: ['namespace', 'alertname', 'pod']
+          group_wait: 10s
+          group_interval: 1m
+          # 15m matches the Causa Backend cooldown period — ensures the same alert
+          # is not re-sent before a previous RCA has had time to complete.
+          repeat_interval: 15m
     receivers:
       - name: causa-webhook
         webhook_configs:
@@ -112,7 +122,13 @@ alertmanager:
 
 prometheus:
   prometheusSpec:
-    # Pick up PrometheusRule resources from all namespaces
+    # Pick up PrometheusRule resources from all namespaces.
+    # ruleSelectorNilUsesHelmValues defaults to true, under which the chart
+    # treats an empty ruleSelector: {} as "use ruleSelector: {matchLabels:
+    # {release: <helm-release-name>}}" instead of "select everything" — so
+    # without disabling it here, causa-rca-alerts (which has no release
+    # label) is silently never loaded by Prometheus.
+    ruleSelectorNilUsesHelmValues: false
     ruleNamespaceSelector: {}
     ruleSelector: {}
     resources:
@@ -131,6 +147,13 @@ grafana:
   enabled: false
 kubeStateMetrics:
   enabled: true
+# kube-state-metrics does not expose kube_pod_labels at all unless a label
+# allowlist is configured — with no allowlist the metric has zero series,
+# so any PromQL rule joining on kube_pod_labels (e.g. the causa.ai/monitoring
+# opt-in filter) silently matches nothing, no matter what labels pods carry.
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - "pods=[causa.ai/monitoring]"
 nodeExporter:
   enabled: false
 prometheusOperator:

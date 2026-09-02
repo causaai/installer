@@ -160,11 +160,22 @@ _ocp_configure_uwm_alertmanager() {
 global:
   resolve_timeout: 5m
 route:
-  receiver: causa-webhook
+  # Default: everything not explicitly matched below goes nowhere —
+  # only Causa's own PrometheusRule alerts (see child route) reach the webhook.
+  receiver: "null"
   group_by: ['namespace', 'alertname', 'pod']
-  group_wait: 10s
-  group_interval: 1m
-  repeat_interval: 15m
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    # Only alerts fired by Causa's PrometheusRule (CausaApp*) go to the webhook.
+    - matchers:
+        - alertname =~ "CausaApp.*"
+      receiver: causa-webhook
+      group_by: ['namespace', 'alertname', 'pod']
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 15m
 receivers:
   - name: causa-webhook
     webhook_configs:
@@ -226,7 +237,7 @@ _ocp_configure_platform_alertmanager() {
 
     # Build the merged config:
     # Append the causa-webhook receiver to the receivers list and add a
-    # child route that matches alerts from the install namespace.
+    # child route that matches only Causa's own PrometheusRule alerts.
     local tmp_cfg; tmp_cfg=$(mktemp /tmp/causa-ocp-am-config-XXXXXX.yaml)
 
     # Use Python with PyYAML to safely merge the YAML.
@@ -243,7 +254,6 @@ import sys, yaml
 in_path   = "${tmp_in}"
 out_path  = "${tmp_cfg}"
 webhook   = "${webhook_url}"
-namespace = "${INSTALL_NAMESPACE}"
 
 with open(in_path) as f:
     cfg = yaml.safe_load(f.read())
@@ -262,12 +272,14 @@ cfg["receivers"].append({
     }]
 })
 
-# Inject a child route scoped to the install namespace (inserted first so it
-# takes precedence over the default catch-all route).
+# Inject a child route scoped to Causa's own PrometheusRule alerts only
+# (inserted first so it takes precedence over the default catch-all route).
+# Matching by alertname rather than namespace ensures unrelated alerts about
+# other workloads in this namespace are NOT sent to Causa.
 route = cfg.setdefault("route", {})
 routes = route.setdefault("routes", [])
 routes.insert(0, {
-    "matchers": ["namespace = " + namespace],
+    "matchers": ['alertname =~ "CausaApp.*"'],
     "receiver": "causa-webhook",
     "group_by":        ["namespace", "alertname", "pod"],
     "group_wait":      "10s",
