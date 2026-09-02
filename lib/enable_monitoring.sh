@@ -351,16 +351,19 @@ _ocp_apply_prometheus_rule() {
 
 ################################################################################
 # _ocp_apply_network_policy
-# Allows Alertmanager (platform or UWM namespace) and causa-mcp to reach
-# Causa Backend on port 8080.
+# Allows Alertmanager (platform or UWM namespace) and the OpenShift ingress
+# router to reach Causa Backend on port 8080.
 ################################################################################
 _ocp_apply_network_policy() {
-    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager and causa-mcp → Causa Backend..."
+    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager + ingress → Causa Backend..."
 
     local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
 
-    # Allow from both possible Alertmanager namespaces so the policy works
-    # regardless of which topology the cluster uses.
+    # Allow from:
+    #   1. Both possible Alertmanager namespaces (platform + UWM) — topology-agnostic.
+    #   2. causa-mcp in the same namespace.
+    #   3. openshift-ingress — the HAProxy router namespace. Without this rule
+    #      the router cannot reach the pod and returns HTTP 503 to external callers.
     cat > "${tmp}" << EOF
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -388,6 +391,13 @@ spec:
         - podSelector:
             matchLabels:
               app: causa-mcp
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-ingress
       ports:
         - protocol: TCP
           port: 8080
