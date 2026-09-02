@@ -15,8 +15,13 @@ _quarkus_mcp_not_released() {
 ################################################################################
 # install_quarkus_mcp
 ################################################################################
-# OCP UWM Prometheus service URL (used when INSTALL_TARGET=openshift)
-_OCP_PROMETHEUS_URL="http://prometheus-user-workload.openshift-user-workload-monitoring.svc.cluster.local:9090"
+# _ocp_prometheus_url — resolves the Prometheus service URL for OpenShift UWM
+# dynamically at call time so that a non-default OCP_UWM_NAMESPACE is honoured.
+# The UWM service exposes metrics on port 9091 (not 9090).
+_ocp_prometheus_url() {
+    local ns="${OCP_UWM_NAMESPACE:-openshift-user-workload-monitoring}"
+    echo "http://prometheus-user-workload.${ns}.svc.cluster.local:9091"
+}
 
 install_quarkus_mcp() {
     log_section_silent "Installing Quarkus MCP Server"
@@ -50,14 +55,20 @@ install_quarkus_mcp() {
     # Select the correct Prometheus URL for the target platform
     local prom_url
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        prom_url="${_OCP_PROMETHEUS_URL}"
+        prom_url="$(_ocp_prometheus_url)"
         write_to_log_file "INFO" "Using OpenShift UWM Prometheus URL: ${prom_url}"
     else
         prom_url="http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090"
         write_to_log_file "INFO" "Using kube-prometheus-stack URL: ${prom_url}"
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-manifest-XXXXXX.yaml)
+    # Fix (comment 2): check mktemp before using the path; use $$ in the name
+    # to avoid collisions with leftover files from interrupted runs.
+    local tmp
+    if ! tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml); then
+        log_error "Failed to create temporary file for Quarkus MCP manifest"
+        return 1
+    fi
     sed -e "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" \
         -e "s|image: .*quarkus-mcp.*|image: ${img}|g" \
         -e "s|PROMETHEUS_URL:.*|PROMETHEUS_URL: \"${prom_url}\"|g" \
@@ -76,11 +87,14 @@ install_quarkus_mcp() {
 
     write_to_log_file "SUCCESS" "Quarkus MCP Server installed"
 
-    # On OpenShift expose via a Route
+    # On OpenShift expose via a Route.
+    # Fix (comment 1): on Route apply failure, delete the already-applied
+    # deployment manifest so no partial install is left behind.
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local route="${SCRIPT_DIR}/manifests/openshift/quarkus-mcp-route.yaml"
         if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
-            log_error "Failed to apply Quarkus MCP Server Route"
+            log_error "Failed to apply Quarkus MCP Server Route — rolling back deployment"
+            delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
             return 1
         fi
         write_to_log_file "INFO" "Route created for Quarkus MCP Server"
