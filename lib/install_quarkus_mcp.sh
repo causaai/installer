@@ -15,12 +15,11 @@ _quarkus_mcp_not_released() {
 ################################################################################
 # install_quarkus_mcp
 ################################################################################
-# _ocp_prometheus_url — resolves the Prometheus service URL for OpenShift UWM
-# dynamically at call time so that a non-default OCP_UWM_NAMESPACE is honoured.
-# The UWM service exposes metrics on port 9091 (not 9090).
+# _ocp_prometheus_url — returns the Prometheus service URL for OpenShift UWM.
+# OpenShift always uses the fixed openshift-user-workload-monitoring namespace.
+# The UWM service exposes metrics on port 9091.
 _ocp_prometheus_url() {
-    local ns="${OCP_UWM_NAMESPACE:-openshift-user-workload-monitoring}"
-    echo "http://prometheus-user-workload.${ns}.svc.cluster.local:9091"
+    echo "http://prometheus-user-workload.openshift-user-workload-monitoring.svc.cluster.local:9091"
 }
 
 install_quarkus_mcp() {
