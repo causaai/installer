@@ -228,8 +228,24 @@ install_jafra_agent() {
     fi
     write_to_log_file "SUCCESS" "Agent RBAC applied"
 
-    # ── 2. Deploy agent DaemonSet with image substitution ────────────────────
-    manifest="${SCRIPT_DIR}/manifests/jafra/agent/daemonset.yaml"
+    # ── 2. On OpenShift: grant SCC so initContainer can run as root and main
+    #       container can run as the explicit UID 1000 ─────────────────────────
+    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
+        if ! apply_manifest "${SCRIPT_DIR}/manifests/openshift/jafra/jafra-agent-scc.yaml" "${INSTALL_NAMESPACE}"; then
+            log_error "Failed to apply agent SCC binding"
+            return 1
+        fi
+        write_to_log_file "SUCCESS" "Agent SCC binding applied"
+    fi
+
+    # ── 3. Deploy agent DaemonSet with image substitution ────────────────────
+    #       OpenShift uses its own manifest (initContainer + runAsUser/Group/NonRoot)
+    #       Kind uses the plain manifest (no special UID requirements)
+    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
+        manifest="${SCRIPT_DIR}/manifests/openshift/jafra/daemonset.yaml"
+    else
+        manifest="${SCRIPT_DIR}/manifests/jafra/agent/daemonset.yaml"
+    fi
     local img="${JAFRA_AGENT_IMAGE}"
     write_to_log_file "INFO" "Using agent image: ${img}"
     if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}" \
@@ -257,8 +273,13 @@ install_jafra_agent() {
 ################################################################################
 uninstall_jafra_agent() {
     write_to_log_file "INFO" "Deleting Jafra Agent..."
-    delete_manifest "${SCRIPT_DIR}/manifests/jafra/agent/daemonset.yaml" "${INSTALL_NAMESPACE}"
-    delete_manifest "${SCRIPT_DIR}/manifests/jafra/agent/rbac.yaml"      "${INSTALL_NAMESPACE}"
+    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
+        delete_manifest "${SCRIPT_DIR}/manifests/openshift/jafra/daemonset.yaml"        "${INSTALL_NAMESPACE}"
+        delete_manifest "${SCRIPT_DIR}/manifests/openshift/jafra/jafra-agent-scc.yaml"  "${INSTALL_NAMESPACE}"
+    else
+        delete_manifest "${SCRIPT_DIR}/manifests/jafra/agent/daemonset.yaml" "${INSTALL_NAMESPACE}"
+    fi
+    delete_manifest "${SCRIPT_DIR}/manifests/jafra/agent/rbac.yaml" "${INSTALL_NAMESPACE}"
     write_to_log_file "SUCCESS" "Jafra Agent removed"
 }
 
