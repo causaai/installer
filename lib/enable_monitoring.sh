@@ -23,7 +23,7 @@
 #   2. Configures the correct Alertmanager with a webhook receiver pointing to:
 #        http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/webhooks/alerts
 #   3. Applies a PrometheusRule (same alert rules used on Kind)
-#   4. Applies a NetworkPolicy (allows Alertmanager → Causa Backend on port 8080)
+#   4. Applies a NetworkPolicy (allows Alertmanager and causa-mcp → Causa Backend on port 8080)
 #
 # References:
 #   https://docs.openshift.com/container-platform/latest/monitoring/enabling-monitoring-for-user-defined-projects.html
@@ -351,10 +351,11 @@ _ocp_apply_prometheus_rule() {
 
 ################################################################################
 # _ocp_apply_network_policy
-# Allows Alertmanager (platform or UWM namespace) to reach Causa Backend.
+# Allows Alertmanager (platform or UWM namespace) and causa-mcp to reach
+# Causa Backend on port 8080.
 ################################################################################
 _ocp_apply_network_policy() {
-    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager → Causa Backend..."
+    write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager and causa-mcp → Causa Backend..."
 
     local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
 
@@ -383,15 +384,22 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app: causa-mcp
+      ports:
+        - protocol: TCP
+          port: 8080
 EOF
 
     if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
         rm -f "${tmp}"
-        log_error "Failed to apply NetworkPolicy for Alertmanager"
+        log_error "Failed to apply NetworkPolicy for Alertmanager and causa-mcp"
         return 1
     fi
     rm -f "${tmp}"
-    write_to_log_file "SUCCESS" "NetworkPolicy applied"
+    write_to_log_file "SUCCESS" "NetworkPolicy applied (Alertmanager and causa-mcp → Causa Backend on port 8080)"
     return 0
 }
 
