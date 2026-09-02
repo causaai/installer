@@ -372,25 +372,31 @@ main() {
     installed_components+=("Kubernetes MCP Server")
 
     # ── Step 5: Jafra Ecosystem (Controller + Analyzer + Agent) ─────────────
-    start_spinner "Installing Jafra Ecosystem..."
-    if ! install_jafra; then
-        stop_spinner
-        log_warn "Jafra Ecosystem installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Jafra Ecosystem"
-        installed_components+=("Jafra Ecosystem")
+    # Not supported on OpenShift — skipped for that target.
+    if ! _is_openshift_target; then
+        start_spinner "Installing Jafra Ecosystem..."
+        if ! install_jafra; then
+            stop_spinner
+            log_warn "Jafra Ecosystem installation skipped or failed"
+        else
+            stop_spinner
+            log_install_success "Jafra Ecosystem"
+            installed_components+=("Jafra Ecosystem")
+        fi
     fi
 
     # ── Step 6: Jafra MCP Server ─────────────────────────────────────────────
-    start_spinner "Installing Jafra MCP Server..."
-    if ! install_jafra_mcp; then
-        stop_spinner
-        log_warn "Jafra MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Jafra MCP Server"
-        installed_components+=("Jafra MCP Server")
+    # Not supported on OpenShift — skipped for that target.
+    if ! _is_openshift_target; then
+        start_spinner "Installing Jafra MCP Server..."
+        if ! install_jafra_mcp; then
+            stop_spinner
+            log_warn "Jafra MCP Server installation skipped or failed"
+        else
+            stop_spinner
+            log_install_success "Jafra MCP Server"
+            installed_components+=("Jafra MCP Server")
+        fi
     fi
 
     # ── Step 7: Quarkus MCP Server ───────────────────────────────────────────
@@ -499,18 +505,20 @@ uninstall_main() {
         fi
     fi
 
-    # Uninstall Quarkus MCP, Jafra MCP, and Jafra Ecosystem (all targets)
     start_spinner "Uninstalling Quarkus MCP Server..."
     uninstall_quarkus_mcp
     stop_spinner; log_uninstall_success "Quarkus MCP Server"
 
-    start_spinner "Uninstalling Jafra MCP Server..."
-    uninstall_jafra_mcp
-    stop_spinner; log_uninstall_success "Jafra MCP Server"
+    # Jafra MCP and Jafra Ecosystem are not installed on OpenShift — skip uninstall.
+    if ! _is_openshift_target; then
+        start_spinner "Uninstalling Jafra MCP Server..."
+        uninstall_jafra_mcp
+        stop_spinner; log_uninstall_success "Jafra MCP Server"
 
-    start_spinner "Uninstalling Jafra Ecosystem..."
-    uninstall_jafra
-    stop_spinner; log_uninstall_success "Jafra Ecosystem"
+        start_spinner "Uninstalling Jafra Ecosystem..."
+        uninstall_jafra
+        stop_spinner; log_uninstall_success "Jafra Ecosystem"
+    fi
 
     # kind-only teardown (cert-manager, Causa Backend, Causa MCP, PostgreSQL Deployment)
     if _is_kind_target; then
