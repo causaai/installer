@@ -332,7 +332,7 @@ _tune_kind_node_sysctls() {
         return 1
     fi
 
-    log_install_success "inotify sysctls OK (max_user_instances and max_user_watches meet minimums)"
+    write_to_log_file "SUCCESS" "inotify sysctls OK (max_user_instances and max_user_watches meet minimums)"
     return 0
 }
 
