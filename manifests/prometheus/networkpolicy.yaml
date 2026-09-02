@@ -3,9 +3,6 @@
 #   2. causa-mcp in the same namespace — it calls the backend REST API at startup
 #      and on every tool invocation; without this rule its traffic is silently
 #      dropped on clusters with a default-deny ingress NetworkPolicy.
-#   3. OpenShift ingress router (openshift-ingress namespace) — required so the
-#      HAProxy router can proxy external HTTPS traffic to the backend pod.
-#      Without this rule the router times out and returns HTTP 503.
 #
 # Namespace placeholder: PLACEHOLDER_NAMESPACE  (replaced by installer at apply time)
 #
@@ -34,13 +31,6 @@ spec:
         - podSelector:
             matchLabels:
               app: causa-mcp
-      ports:
-        - protocol: TCP
-          port: 8080
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openshift-ingress
       ports:
         - protocol: TCP
           port: 8080
