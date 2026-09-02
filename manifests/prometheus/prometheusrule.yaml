@@ -164,6 +164,7 @@ spec:
               namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
+          for: 2m
           labels:
             severity: warning
           annotations:
