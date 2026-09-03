@@ -1,37 +1,40 @@
 # Causa RCA Installer
 
-Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind.sigs.k8s.io/) cluster in a single command.
+Deploys the full Causa RCA infrastructure stack in a single command.
+Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster and an existing [OpenShift](https://www.redhat.com/en/technologies/cloud-computing/openshift) cluster.
 
 ## What gets installed
 
-| Component | Service type | Host access |
-|---|---|---|
-| Kubernetes MCP Server | NodePort | `localhost:30000` |
-| Causa Backend | ClusterIP | `kubectl port-forward svc/causa-backend 30001:8080` |
-| Jafra MCP Server | NodePort | Kind node only — not mapped to localhost (30003) |
-| Quarkus MCP Server | NodePort | `localhost:30004` |
-| Causa MCP Server | ClusterIP | `kubectl port-forward svc/causa-mcp 30005:8081` |
-| PostgreSQL (pgvector) | ClusterIP | — (internal) |
-| Jafra Ecosystem (Controller + Analyzer + Agent) | ClusterIP | — (internal) |
-
-> **Causa Backend & Causa MCP Server** are exposed as `ClusterIP` services (not NodePorts).
-> Reach them from the host with `kubectl port-forward` in the target namespace, e.g.:
->
-> ```bash
-> # Replace causa-rca with your installation namespace if you used -n
-> kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca
-> kubectl port-forward svc/causa-mcp 30005:8081 -n causa-rca
-> ```
+| Component | Kind | OpenShift | Access |
+|---|---|---|---|
+| Kubernetes MCP Server | ✓ | ✓ | NodePort 30000 (Kind) / Route (OpenShift) |
+| Causa Backend | ✓ | ✓ | NodePort 30001 (Kind) / Route (OpenShift) |
+| Quarkus MCP Server | ✓ | ✓ | NodePort 30004 (Kind) / ClusterIP (OpenShift) |
+| Causa MCP Server | ✓ | ✓ | NodePort 30005 (Kind) / Route (OpenShift) |
+| PostgreSQL (pgvector) | ✓ | ✓ | ClusterIP — standalone Deployment (Kind) / CloudNativePG operator (OpenShift) |
+| Prometheus Stack | ✓ | — | kube-prometheus-stack on Kind; built-in UWM on OpenShift (no install needed) |
+| Jafra Ecosystem (Controller + Analyzer + Agent) | ✓ | — | Not supported on OpenShift |
+| Jafra MCP Server | ✓ | — | Not supported on OpenShift |
 
 ## Prerequisites
+
+### Kind
 
 - [`docker`](https://docs.docker.com/get-docker/) **or** [`podman`](https://podman.io/getting-started/installation) (rootful mode)
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
-- [`helm`](https://helm.sh/docs/intro/install/) — required only for the Prometheus Stack; cert-manager is installed from the official release manifest with `kubectl apply -f`
+- [`helm`](https://helm.sh/docs/intro/install/) — required for the Prometheus Stack
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
 > **Podman users:** the Podman machine must be started in rootful mode (`podman machine init --rootful`).
+
+### OpenShift
+
+- [`oc`](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) (preferred) or `kubectl`
+- `curl`, `grep`, `sed`, `awk`
+- An active login to the target cluster (`oc login`)
+- `cert-manager` already installed in the cluster
+- `python3` with `PyYAML` — required to merge the Alertmanager config (`pip3 install pyyaml`)
 
 ## Quickstart
 
@@ -39,8 +42,11 @@ Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind
 git clone https://github.com/causaai/installer.git
 cd installer
 
-# Full install — provisions Kind cluster and all components
+# Kind — provisions a local cluster and deploys all components
 ./install.sh
+
+# OpenShift — deploys into an existing logged-in cluster
+./install.sh --target openshift
 
 # Dry run — validate prerequisites without making changes
 ./install.sh --dry-run
@@ -81,22 +87,25 @@ lib/
   validator.sh                # Pre-flight checks: CLI tools, container runtime, cluster
   install_kind_cluster.sh     # Kind cluster + local registry (kind only)
   install_prometheus.sh       # Prometheus Stack via Helm (kind only)
-  install_cert_manager.sh     # cert-manager via official release manifest (kind only, required by Jafra)
+  enable_monitoring.sh        # OpenShift UWM + Alertmanager webhook config (openshift only)
+  install_cert_manager.sh     # cert-manager via official release manifest (kind only)
   install_k8s_mcp.sh          # Kubernetes MCP Server
-  install_jafra.sh            # Jafra Ecosystem (Controller + Analyzer + Agent)
-  install_jafra_mcp.sh        # Jafra MCP Server
+  install_jafra.sh            # Jafra Ecosystem — kind only
+  install_jafra_mcp.sh        # Jafra MCP Server — kind only
   install_quarkus_mcp.sh      # Quarkus MCP Server
-  install_postgres.sh         # PostgreSQL + pgvector + secrets
+  install_postgres.sh         # PostgreSQL — standalone Deployment (kind) / CloudNativePG (openshift)
   install_causa.sh            # Causa Backend
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
   k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
-  causa/                      # Causa Backend (ClusterIP, port-forward 30001:8080)
-  jafra/                      # Jafra Ecosystem (Controller, Analyzer, Agent)
-  jafra_mcp/                  # Jafra MCP Server (NodePort 30003, Kind node only)
+  causa/                      # Causa Backend (NodePort 30001, kind)
+  jafra/                      # Jafra Ecosystem (kind only)
+  jafra_mcp/                  # Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
-  causa_mcp/                  # Causa MCP Server (ClusterIP, port-forward 30005:8081)
-  postgres/                   # PostgreSQL + pgvector (ClusterIP)
+  causa_mcp/                  # Causa MCP Server (NodePort 30005)
+  postgres/                   # PostgreSQL — kind Deployment + OpenShift CNPG manifests
+  openshift/                  # OpenShift-specific manifests (Routes, Causa Backend, monitoring)
+  prometheus/                 # PrometheusRule (applied on both targets)
 ```
 
 ## Documentation

@@ -7,13 +7,13 @@ For installation steps, see the [Installation Guide](installation.md).
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target TARGET` | `kind` | Target platform (`kind`) |
+| `--target TARGET` | `kind` | Target platform: `kind` or `openshift` |
 | `-n, --namespace NAMESPACE` | `causa-rca` | Namespace for all components |
 | `-t, --terminate` | — | Uninstall all components |
-| `--delete-cluster` | — | Also delete the Kind cluster when terminating |
+| `--delete-cluster` | — | Also delete the Kind cluster when terminating (kind only) |
 | `--dry-run` | — | Validate without making changes |
-| `--cluster-name NAME` | `causa-rca` | Kind cluster name |
-| `--registry-port PORT` | `5001` | Local registry host port |
+| `--cluster-name NAME` | `causa-rca` | Kind cluster name (kind only) |
+| `--registry-port PORT` | `5001` | Local registry host port (kind only) |
 | `-h, --help` | — | Print usage |
 
 ## Environment variables
@@ -22,12 +22,12 @@ For installation steps, see the [Installation Guide](installation.md).
 
 | Variable | Default | Description |
 |---|---|---|
-| `INSTALL_TARGET` | `kind` | Target platform |
+| `INSTALL_TARGET` | `kind` | Target platform: `kind` or `openshift` |
 | `INSTALL_NAMESPACE` | `causa-rca` | Namespace for all components |
-| `KUBE_CLI` | `kubectl` | kubectl binary to use (override when using a custom path) |
+| `KUBE_CLI` | `kubectl` | kubectl binary to use (set to `oc` automatically when `oc` is detected on OpenShift) |
 | `DRY_RUN` | `false` | Set to `true` to validate without installing |
 | `TERMINATE` | `false` | Set to `true` to uninstall |
-| `DELETE_CLUSTER` | `false` | Set to `true` to delete cluster on terminate |
+| `DELETE_CLUSTER` | `false` | Set to `true` to delete cluster on terminate (kind only) |
 
 ### Kind-specific
 
@@ -62,40 +62,42 @@ Priority order (highest to lowest):
 
 ### CLI flags
 
-| Flag | Component |
-|---|---|
-| `--k8s-mcp-server-image IMAGE` | Kubernetes MCP Server |
-| `--jafra-mcp-image IMAGE` | Jafra MCP Server |
-| `--causa-backend-image IMAGE` | Causa Backend |
-| `--quarkus-mcp-image IMAGE` | Quarkus MCP Server |
-| `--causa-mcp-image IMAGE` | Causa MCP Server |
-| `--jafra-controller-image IMAGE` | Jafra Controller |
-| `--jafra-analyzer-image IMAGE` | Jafra Analyzer |
-| `--jafra-agent-image IMAGE` | Jafra Agent |
-| `--postgres-kind-image IMAGE` | PostgreSQL (Kind — pgvector-enabled image) |
+| Flag | Component | Target |
+|---|---|---|
+| `--k8s-mcp-server-image IMAGE` | Kubernetes MCP Server | both |
+| `--causa-backend-image IMAGE` | Causa Backend | both |
+| `--quarkus-mcp-image IMAGE` | Quarkus MCP Server | both |
+| `--causa-mcp-image IMAGE` | Causa MCP Server | both |
+| `--postgres-kind-image IMAGE` | PostgreSQL (Kind — pgvector-enabled image) | kind only |
+| `--postgres-ocp-image IMAGE` | PostgreSQL (OpenShift — CloudNativePG image) | openshift only |
+| `--jafra-mcp-image IMAGE` | Jafra MCP Server | kind only |
+| `--jafra-controller-image IMAGE` | Jafra Controller | kind only |
+| `--jafra-analyzer-image IMAGE` | Jafra Analyzer | kind only |
+| `--jafra-agent-image IMAGE` | Jafra Agent | kind only |
 
 ### Environment variables
 
-| Variable | Component |
-|---|---|
-| `K8S_MCP_SERVER_IMAGE` | Kubernetes MCP Server |
-| `JAFRA_MCP_IMAGE` | Jafra MCP Server |
-| `CAUSA_BACKEND_IMAGE` | Causa Backend |
-| `QUARKUS_MCP_IMAGE` | Quarkus MCP Server |
-| `CAUSA_MCP_IMAGE` | Causa MCP Server |
-| `JAFRA_CONTROLLER_IMAGE` | Jafra Controller |
-| `JAFRA_ANALYZER_IMAGE` | Jafra Analyzer |
-| `JAFRA_AGENT_IMAGE` | Jafra Agent |
-| `POSTGRES_KIND_IMAGE` | PostgreSQL (Kind) |
+| Variable | Component | Target |
+|---|---|---|
+| `K8S_MCP_SERVER_IMAGE` | Kubernetes MCP Server | both |
+| `CAUSA_BACKEND_IMAGE` | Causa Backend | both |
+| `QUARKUS_MCP_IMAGE` | Quarkus MCP Server | both |
+| `CAUSA_MCP_IMAGE` | Causa MCP Server | both |
+| `POSTGRES_KIND_IMAGE` | PostgreSQL (Kind) | kind only |
+| `POSTGRES_OCP_IMAGE` | PostgreSQL (OpenShift / CloudNativePG) | openshift only |
+| `JAFRA_MCP_IMAGE` | Jafra MCP Server | kind only |
+| `JAFRA_CONTROLLER_IMAGE` | Jafra Controller | kind only |
+| `JAFRA_ANALYZER_IMAGE` | Jafra Analyzer | kind only |
+| `JAFRA_AGENT_IMAGE` | Jafra Agent | kind only |
 
 ### Examples
 
 ```bash
-# Override Causa Backend image
+# Override Causa Backend image (works on both targets)
 ./install.sh --causa-backend-image quay.io/myorg/causa-backend:v1.2.3
 
-# Override Jafra MCP image
-./install.sh --jafra-mcp-image quay.io/causa-ai-hub/jafra-mcp-server:0.2.0
+# Override PostgreSQL image on OpenShift
+./install.sh --target openshift --postgres-ocp-image quay.io/myorg/postgres-pgvector:17
 
 # Override via environment variable
 export CAUSA_MCP_IMAGE=quay.io/causaai/causa-mcp:v0.1.0
@@ -119,8 +121,8 @@ Every image value is validated before use:
 The following components are skipped when their image variables are empty.
 To enable them, set the image in `lib/images.env` or pass the CLI flag.
 
-| Component | Required image variables |
-|---|---|
-| Jafra Ecosystem | `JAFRA_CONTROLLER_IMAGE`, `JAFRA_ANALYZER_IMAGE`, `JAFRA_AGENT_IMAGE` (all three required) |
-| Jafra MCP Server | `JAFRA_MCP_IMAGE` |
-| Quarkus MCP Server | `QUARKUS_MCP_IMAGE` |
+| Component | Required image variables | Target |
+|---|---|---|
+| Jafra Ecosystem | `JAFRA_CONTROLLER_IMAGE`, `JAFRA_ANALYZER_IMAGE`, `JAFRA_AGENT_IMAGE` (all three required) | kind only |
+| Jafra MCP Server | `JAFRA_MCP_IMAGE` | kind only |
+| Quarkus MCP Server | `QUARKUS_MCP_IMAGE` | both |

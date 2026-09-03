@@ -5,6 +5,8 @@ For a quick start, see the [README](../README.md).
 
 ## Prerequisites
 
+### Kind
+
 | Tool | Purpose | Install |
 |---|---|---|
 | `docker` or `podman` | Container runtime for Kind | [docker](https://docs.docker.com/get-docker/) / [podman](https://podman.io/getting-started/installation) |
@@ -19,7 +21,19 @@ For a quick start, see the [README](../README.md).
 > podman machine start
 > ```
 
-## Default installation
+### OpenShift
+
+| Tool | Purpose | Install |
+|---|---|---|
+| `oc` (preferred) or `kubectl` | Cluster CLI | [OpenShift CLI](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) / [kubectl](https://kubernetes.io/docs/tasks/tools/) |
+| `helm`, `curl`, `grep`, `sed`, `awk` | Script utilities | Pre-installed on most Linux distributions |
+| `python3` + `PyYAML` | Alertmanager config merge | `pip3 install pyyaml` |
+
+**Cluster prerequisites (must be in place before running the installer):**
+- Logged in to the cluster: `oc login <api-url>`
+- `cert-manager` installed and running
+
+## Default installation (Kind)
 
 Provisions a Kind cluster and deploys all components into the `causa-rca` namespace.
 
@@ -29,10 +43,32 @@ cd installer
 ./install.sh
 ```
 
+## OpenShift installation
+
+Deploys into an existing OpenShift cluster. No cluster is created — the installer
+connects to whichever cluster your current `oc`/`kubectl` context points to.
+
+```bash
+./install.sh --target openshift
+```
+
+> **Note:** Jafra (Ecosystem + MCP Server) is not supported on OpenShift and is automatically skipped.
+
+The following components are installed on OpenShift:
+- Kubernetes MCP Server
+- Quarkus MCP Server
+- PostgreSQL via CloudNativePG operator
+- Causa Backend
+- Causa MCP Server
+- OpenShift User Workload Monitoring enabled + Alertmanager webhook configured
+
 ## Custom namespace
 
 ```bash
 ./install.sh -n my-namespace
+
+# OpenShift
+./install.sh --target openshift -n my-namespace
 ```
 
 ## Setting the target Quarkus app URL
@@ -60,6 +96,9 @@ Validates prerequisites and configuration without making any cluster changes:
 
 ```bash
 ./install.sh --dry-run
+
+# OpenShift
+./install.sh --target openshift --dry-run
 ```
 
 ## View all flags
@@ -72,11 +111,11 @@ See [Configuration](configuration.md) for the full reference.
 
 ## Installation order
 
-Components are deployed in this sequence:
+### Kind
 
 1. Kind cluster + local registry
 2. Prometheus Stack (kube-prometheus-stack, `monitoring` namespace)
-3. cert-manager (installed from official release manifest via `kubectl apply -f`, required by Jafra Controller webhook TLS)
+3. cert-manager (installed from official release manifest via `kubectl apply -f`)
 4. Kubernetes MCP Server
 5. Jafra Ecosystem (Controller → Analyzer → Agent) _(skipped if images not set)_
 6. Jafra MCP Server _(skipped if image not set)_
@@ -85,7 +124,18 @@ Components are deployed in this sequence:
 9. Causa Backend _(stamps MCP env vars + waits for rollout)_
 10. Causa MCP Server
 
+### OpenShift
+
+1. OpenShift User Workload Monitoring enabled + Alertmanager webhook configured
+2. Kubernetes MCP Server + Route
+3. Quarkus MCP Server _(skipped if image not set)_
+4. PostgreSQL via CloudNativePG operator
+5. Causa Backend + Route _(stamps MCP env vars + waits for rollout)_
+6. Causa MCP Server + Route
+
 ## Uninstallation
+
+### Kind
 
 Removes all components in reverse order. The Kind cluster is preserved by default.
 
@@ -99,13 +149,29 @@ Removes all components in reverse order. The Kind cluster is preserved by defaul
 
 > Always pass the same `-n` and `--cluster-name` flags during uninstallation that you used during installation.
 
+### OpenShift
+
+Removes all installed components and the namespace.
+
+```bash
+./install.sh --target openshift --terminate
+
+# Custom namespace
+./install.sh --target openshift -n my-namespace --terminate
+```
+
 ## Re-installation
 
 Uninstall first, then install again:
 
 ```bash
+# Kind
 ./install.sh --terminate
 ./install.sh
+
+# OpenShift
+./install.sh --target openshift --terminate
+./install.sh --target openshift
 ```
 
 ## Logs
