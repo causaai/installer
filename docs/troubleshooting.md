@@ -146,13 +146,15 @@ kind delete cluster --name causa-rca
 
 ### Ports already in use — 30000, 30001, 30004, 30005
 
-The pre-flight check verifies all four ports are free. **30000** (Kubernetes MCP) and **30004** (Quarkus MCP)
-are NodePorts mapped to `localhost` in the Kind cluster config — after deleting a Kind cluster, gvproxy
-(Podman/Docker network proxy) may still hold these host bindings. **30001** (Causa Backend) and **30005**
-(Causa MCP) are `ClusterIP` services with no Kind host mapping, but the demo runs `kubectl port-forward` on
-exactly those host ports, so they are checked too — a non-Kind process on either would break the advertised
-port-forward access. Port 30003 (Jafra MCP) is a NodePort inside the cluster only, is neither host-mapped nor
-port-forwarded, and is not checked.
+The pre-flight check verifies these host ports are free. **30000** (Kubernetes MCP) and **30004** (Quarkus MCP)
+are NodePorts mapped to `localhost` in the Kind cluster config, so they are checked **only when a new cluster
+is created** — after deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold these host
+bindings; when reusing an existing cluster the running Kind node already binds them, so they are not re-checked.
+**30001** (Causa Backend) and **30005** (Causa MCP) are `ClusterIP` services with no Kind host mapping, but the
+installer advertises `kubectl port-forward` on exactly those host ports — so they are checked on **both** the
+create and reuse paths, since a non-Kind process on either would break the advertised port-forward access.
+Port 30003 (Jafra MCP) is a NodePort inside the cluster only, is neither host-mapped nor port-forwarded, and
+is never checked.
 
 ```bash
 # Option 1 — restart the container runtime
