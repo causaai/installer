@@ -31,7 +31,8 @@ kubectl logs -n causa-rca -l app=causa-backend
 # Verify MCP env vars were stamped correctly
 kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
 
-# Health check (requires NodePort access)
+# Health check (Causa Backend is a ClusterIP service — port-forward first)
+kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca &
 curl http://localhost:30001/q/health/ready
 ```
 
@@ -145,9 +146,13 @@ kind delete cluster --name causa-rca
 
 ### Ports already in use — 30000, 30001, 30004, 30005
 
-After deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold the host port bindings.
-These are the four ports mapped to `localhost` in the Kind cluster config. Port 30003 (Jafra MCP) is a
-NodePort inside the cluster only and is not bound on the host.
+The pre-flight check verifies all four ports are free. **30000** (Kubernetes MCP) and **30004** (Quarkus MCP)
+are NodePorts mapped to `localhost` in the Kind cluster config — after deleting a Kind cluster, gvproxy
+(Podman/Docker network proxy) may still hold these host bindings. **30001** (Causa Backend) and **30005**
+(Causa MCP) are `ClusterIP` services with no Kind host mapping, but the demo runs `kubectl port-forward` on
+exactly those host ports, so they are checked too — a non-Kind process on either would break the advertised
+port-forward access. Port 30003 (Jafra MCP) is a NodePort inside the cluster only, is neither host-mapped nor
+port-forwarded, and is not checked.
 
 ```bash
 # Option 1 — restart the container runtime
