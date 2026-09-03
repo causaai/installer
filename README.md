@@ -9,7 +9,7 @@ Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster
 |---|---|---|---|
 | Kubernetes MCP Server | ✓ | ✓ | NodePort 30000 (Kind) / Route (OpenShift) |
 | Causa Backend | ✓ | ✓ | NodePort 30001 (Kind) / Route (OpenShift) |
-| Quarkus MCP Server | ✓ | ✓ | NodePort 30004 (Kind) / ClusterIP (OpenShift) |
+| Quarkus MCP Server | ✓ | ✓ | NodePort 30004 (Kind) / Route (OpenShift) |
 | Causa MCP Server | ✓ | ✓ | NodePort 30005 (Kind) / Route (OpenShift) |
 | PostgreSQL (pgvector) | ✓ | ✓ | ClusterIP — standalone Deployment (Kind) / CloudNativePG operator (OpenShift) |
 | Prometheus Stack | ✓ | — | kube-prometheus-stack on Kind; built-in UWM on OpenShift (no install needed) |

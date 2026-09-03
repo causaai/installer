@@ -129,7 +129,7 @@ oc get prometheusrule -n causa-rca
 
 ### Prerequisites missing
 
-The installer checks for required tools before doing anything. Install any missing tools and rerun.
+The installer checks for required CLI tools before doing anything. Install any missing tools and rerun. OpenShift Alertmanager Topology B additionally requires `python3` with the `yaml` module — the installer does not check for this and will fail mid-run if it is absent; install it before running.
 
 **Kind:** `kubectl`, `docker`/`podman`, `kind`, `helm`, `curl`, `grep`, `sed`, `awk`
 
