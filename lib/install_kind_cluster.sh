@@ -85,12 +85,11 @@ _start_local_registry() {
     return 0
 }
 
-# _check_ports_available — fails with a clear message if any required host port is in use.
-# Checks 30000/30004 (the host-mapped Kind node NodePorts) plus 30001 (Causa Backend) and
-# 30005 (Causa MCP). The latter two have no kind hostPort mapping, but the demo starts
-# `kubectl port-forward` on exactly those host ports, so a non-Kind process occupying either
-# would let install succeed yet break the advertised port-forward access — catch it early.
-# 30003 (Jafra MCP) is neither host-mapped nor port-forwarded, so it is not checked. Registry
+# _check_ports_available <port>... — fails with a clear message if any given host port is in use.
+# Callers pass ports per path: create → 30000/30004 (Kind NodePorts) + 30001/30005; reuse →
+# 30001/30005 only (the running Kind node already binds 30000/30004). 30001/30005 back the
+# advertised `kubectl port-forward` on both paths, so they must be checked even on reuse.
+# 30003 (Jafra MCP) and the registry port are not checked.
 #
 # gvproxy / rootlessport stale-lease exception (Linux rootless Podman only):
 #   After all containers that owned a port mapping are removed, gvproxy keeps the
@@ -100,7 +99,10 @@ _start_local_registry() {
 #   gvproxy/rootlessport AND no running container is currently publishing that port —
 #   confirming it is truly a stale lease rather than an active conflict.
 _check_ports_available() {
-    local ports=(30000 30001 30004 30005)
+    local ports=("$@")
+    if [[ ${#ports[@]} -eq 0 ]]; then
+        ports=(30000 30001 30004 30005)
+    fi
     local blocked=()
     local runtime="${CONTAINER_RUNTIME:-docker}"
 
@@ -362,8 +364,15 @@ install_kind_cluster() {
 
     if _kind_cluster_exists; then
         write_to_log_file "INFO" "Kind cluster '${KIND_CLUSTER_NAME}' already exists — skipping creation"
+        # Cluster reuse still advertises `kubectl port-forward` on 30001/30005, so
+        # guard those host ports even though cluster creation is skipped. The Kind
+        # host-mapped NodePorts (30000/30004) are intentionally NOT checked here —
+        # the running Kind node already binds them.
+        if ! _check_ports_available 30001 30005; then
+            return 1
+        fi
     else
-        if ! _check_ports_available; then
+        if ! _check_ports_available 30000 30001 30004 30005; then
             return 1
         fi
 
