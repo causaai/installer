@@ -35,7 +35,11 @@ export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 # _kind_cluster_exists  — returns 0 if the cluster is already present
 # ---------------------------------------------------------------------------
 _kind_cluster_exists() {
-    kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"
+    # Must target the same provider used to create the cluster, otherwise a
+    # podman-backed cluster is invisible to the default (docker) provider and
+    # the check wrongly returns false — causing a redundant re-create attempt.
+    KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_RUNTIME:-docker}" \
+        kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"
 }
 
 # ---------------------------------------------------------------------------
@@ -81,10 +85,11 @@ _start_local_registry() {
     return 0
 }
 
-# _check_ports_available — fails with a clear message if any required host port is in use.
-# Only checks the four host-mapped Kind node ports (30000, 30001, 30004, 30005). Port 30003
-# (Jafra MCP) has no hostPort mapping and is not bound on the host. Registry port is
-# excluded because _start_local_registry runs first and manages it idempotently.
+# _check_ports_available <port>... — fails with a clear message if any given host port is in use.
+# Callers pass ports per path: create → 30000/30004 (Kind NodePorts) + 30001/30005; reuse →
+# 30001/30005 only (the running Kind node already binds 30000/30004). 30001/30005 back the
+# advertised `kubectl port-forward` on both paths, so they must be checked even on reuse.
+# 30003 (Jafra MCP) and the registry port are not checked.
 #
 # gvproxy / rootlessport stale-lease exception (Linux rootless Podman only):
 #   After all containers that owned a port mapping are removed, gvproxy keeps the
@@ -94,7 +99,10 @@ _start_local_registry() {
 #   gvproxy/rootlessport AND no running container is currently publishing that port —
 #   confirming it is truly a stale lease rather than an active conflict.
 _check_ports_available() {
-    local ports=(30000 30001 30004 30005)
+    local ports=("$@")
+    if [[ ${#ports[@]} -eq 0 ]]; then
+        ports=(30000 30001 30004 30005)
+    fi
     local blocked=()
     local runtime="${CONTAINER_RUNTIME:-docker}"
 
@@ -158,18 +166,16 @@ kubeadmConfigPatches:
 nodes:
   - role: control-plane
     image: kindest/node:v1.31.14
+    # causa-backend (8080) and causa-mcp (8081) are ClusterIP services reached
+    # from the host via kubectl port-forward, so they get no
+    # host mapping here.  Only the k8s-mcp (30000) and quarkus-mcp (30004)
+    # NodePorts are published to the host.
     extraPortMappings:
       - containerPort: 30000
         hostPort: 30000
         protocol: TCP
-      - containerPort: 30001
-        hostPort: 30001
-        protocol: TCP
       - containerPort: 30004
         hostPort: 30004
-        protocol: TCP
-      - containerPort: 30005
-        hostPort: 30005
         protocol: TCP
 EOF
     echo "${config_file}"
@@ -197,7 +203,8 @@ _write_registry_hosts_toml() {
     local hosts_toml
     hosts_toml=$(printf '[host."http://%s:5000"]\n  capabilities = ["pull", "resolve"]\n' "${KIND_REGISTRY_NAME}")
 
-    for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}" 2>/dev/null); do
+    for node in $(KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_RUNTIME:-docker}" \
+                    kind get nodes --name "${KIND_CLUSTER_NAME}" 2>/dev/null); do
         ${runtime} exec "${node}" mkdir -p "${hosts_dir}" >>"${LOG_FILE}" 2>&1
         ${runtime} exec "${node}" sh -c \
             "printf '%s\n' '${hosts_toml}' > ${hosts_dir}/hosts.toml" >>"${LOG_FILE}" 2>&1
@@ -357,8 +364,15 @@ install_kind_cluster() {
 
     if _kind_cluster_exists; then
         write_to_log_file "INFO" "Kind cluster '${KIND_CLUSTER_NAME}' already exists — skipping creation"
+        # Cluster reuse still advertises `kubectl port-forward` on 30001/30005, so
+        # guard those host ports even though cluster creation is skipped. The Kind
+        # host-mapped NodePorts (30000/30004) are intentionally NOT checked here —
+        # the running Kind node already binds them.
+        if ! _check_ports_available 30001 30005; then
+            return 1
+        fi
     else
-        if ! _check_ports_available; then
+        if ! _check_ports_available 30000 30001 30004 30005; then
             return 1
         fi
 
@@ -451,7 +465,7 @@ uninstall_kind_cluster() {
     if [[ -n "${node_containers}" ]]; then
         write_to_log_file "INFO" "Force-removing Kind node containers to release host ports..."
         echo "${node_containers}" | xargs ${runtime} rm -f >>"${LOG_FILE}" 2>&1 || true
-        write_to_log_file "SUCCESS" "Kind node containers removed (ports 30000/30001/30004/30005 freed)"
+        write_to_log_file "SUCCESS" "Kind node containers removed (ports 30000/30004 freed)"
     fi
 
     # ── Step 3: Delete the cluster record from kind's bookkeeping ─────────────
@@ -460,7 +474,8 @@ uninstall_kind_cluster() {
     # false even for a cluster that was genuinely present.
     if [[ "${cluster_existed}" == "true" ]]; then
         write_to_log_file "INFO" "Deleting Kind cluster '${KIND_CLUSTER_NAME}'..."
-        if ! kind delete cluster --name "${KIND_CLUSTER_NAME}" >>"${LOG_FILE}" 2>&1; then
+        if ! KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_RUNTIME:-docker}" \
+                kind delete cluster --name "${KIND_CLUSTER_NAME}" >>"${LOG_FILE}" 2>&1; then
             # node containers are already removed above; kind delete may emit a
             # harmless "node not found" error — treat that as success, fail on
             # anything else.

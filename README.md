@@ -4,15 +4,24 @@ Deploys the full Causa RCA infrastructure stack onto a local [Kind](https://kind
 
 ## What gets installed
 
-| Component | NodePort |
-|---|---|
-| Kubernetes MCP Server | 30000 |
-| Causa Backend | 30001 |
-| Jafra MCP Server | 30003 (Kind node only — not mapped to localhost) |
-| Quarkus MCP Server | 30004 |
-| Causa MCP Server | 30005 |
-| PostgreSQL (pgvector) | — (ClusterIP) |
-| Jafra Ecosystem (Controller + Analyzer + Agent) | — (internal) |
+| Component | Service type | Host access |
+|---|---|---|
+| Kubernetes MCP Server | NodePort | `localhost:30000` |
+| Causa Backend | ClusterIP | `kubectl port-forward svc/causa-backend 30001:8080` |
+| Jafra MCP Server | NodePort | Kind node only — not mapped to localhost (30003) |
+| Quarkus MCP Server | NodePort | `localhost:30004` |
+| Causa MCP Server | ClusterIP | `kubectl port-forward svc/causa-mcp 30005:8081` |
+| PostgreSQL (pgvector) | ClusterIP | — (internal) |
+| Jafra Ecosystem (Controller + Analyzer + Agent) | ClusterIP | — (internal) |
+
+> **Causa Backend & Causa MCP Server** are exposed as `ClusterIP` services (not NodePorts).
+> Reach them from the host with `kubectl port-forward` in the target namespace, e.g.:
+>
+> ```bash
+> # Replace causa-rca with your installation namespace if you used -n
+> kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca
+> kubectl port-forward svc/causa-mcp 30005:8081 -n causa-rca
+> ```
 
 ## Prerequisites
 
@@ -82,11 +91,11 @@ lib/
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
   k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
-  causa/                      # Causa Backend (NodePort 30001)
+  causa/                      # Causa Backend (ClusterIP, port-forward 30001:8080)
   jafra/                      # Jafra Ecosystem (Controller, Analyzer, Agent)
   jafra_mcp/                  # Jafra MCP Server (NodePort 30003, Kind node only)
   quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
-  causa_mcp/                  # Causa MCP Server (NodePort 30005)
+  causa_mcp/                  # Causa MCP Server (ClusterIP, port-forward 30005:8081)
   postgres/                   # PostgreSQL + pgvector (ClusterIP)
 ```
 

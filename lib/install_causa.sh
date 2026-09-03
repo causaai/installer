@@ -195,7 +195,7 @@ install_causa() {
         fi
         write_to_log_file "SUCCESS" "Causa Backend installed"
         write_to_log_file "INFO"    "Internal URL: http://causa-backend.${INSTALL_NAMESPACE}.svc.cluster.local:8080"
-        write_to_log_file "INFO"    "NodePort: localhost:30001"
+        write_to_log_file "INFO"    "Host access: kubectl port-forward svc/causa-backend 30001:8080 -n ${INSTALL_NAMESPACE}"
     fi
 
     return 0

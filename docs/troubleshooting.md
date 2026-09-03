@@ -31,7 +31,8 @@ kubectl logs -n causa-rca -l app=causa-backend
 # Verify MCP env vars were stamped correctly
 kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
 
-# Health check (requires NodePort access)
+# Health check (Causa Backend is a ClusterIP service — port-forward first)
+kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca &
 curl http://localhost:30001/q/health/ready
 ```
 
@@ -145,9 +146,31 @@ kind delete cluster --name causa-rca
 
 ### Ports already in use — 30000, 30001, 30004, 30005
 
-After deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold the host port bindings.
-These are the four ports mapped to `localhost` in the Kind cluster config. Port 30003 (Jafra MCP) is a
-NodePort inside the cluster only and is not bound on the host.
+The pre-flight check verifies the required host ports are free before installing. Which ports
+are checked depends on the port's role:
+
+**Which ports are checked, and when**
+
+| Port  | Service        | Role                                          | When it's checked    |
+|-------|----------------|-----------------------------------------------|----------------------|
+| 30000 | Kubernetes MCP | NodePort mapped to `localhost`                | New cluster only     |
+| 30004 | Quarkus MCP    | NodePort mapped to `localhost`                | New cluster only     |
+| 30001 | Causa Backend  | ClusterIP, reached via `kubectl port-forward` | Create **and** reuse |
+| 30005 | Causa MCP      | ClusterIP, reached via `kubectl port-forward` | Create **and** reuse |
+| 30003 | Jafra MCP      | NodePort, in-cluster only (not host-mapped)   | Never                |
+
+**How to fix a conflict**
+
+If 30001 or 30005 is in use, it is usually a leftover `kubectl port-forward` from a previous
+session (the installer never starts these itself). Stop it, then re-run:
+
+```bash
+# Find and stop a lingering port-forward on 30001 / 30005
+pkill -f "port-forward.*causa"
+# or kill the specific PID from the error message, e.g. kill 40308
+```
+
+If 30000 or 30004 is in use after deleting a cluster, it is usually a stale gvproxy lease:
 
 ```bash
 # Option 1 — restart the container runtime
