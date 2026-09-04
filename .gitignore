@@ -1,0 +1,47 @@
+
+# ── Log files ─────────────────────────────────────────────────────────────
+*.log
+install.log
+
+# ── Temporary files created by the installer ──────────────────────────────
+/tmp/
+*.tmp
+
+# ── macOS metadata ─────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Editor / IDE ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Bob IDE internal folders (not project config) ─────────────────────────
+# Keep: .bob/mcp.json, .bob/settings/ (project MCP config)
+# Ignore: .bob/artifacts/ (generated HTML reports)
+.bob/artifacts/
+
+# ── Installer runtime state ───────────────────────────────────────────────
+# Written by main() during install; read by uninstall_main() — must not be committed.
+.causa-rca-state
+
+# ── Shell script generated temp manifests ─────────────────────────────────
+# These are written to /tmp/ by the installer — listed here as documentation
+# /tmp/causa-rca-manifest-*.yaml  (handled by mktemp, not in repo)
+# /tmp/kind-config-*.yaml         (handled by mktemp, not in repo)
+# /tmp/causa-prometheus-values-*.yaml (handled by mktemp, not in repo)
+
+# ── OpenShift TLS certificates / kubeconfig secrets ───────────────────────
+# CA bundles, client certs, and token files used for oc login — never commit.
+*.crt
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig
+*-kubeconfig
+ocp-*.ca
+ocp-*.crt
