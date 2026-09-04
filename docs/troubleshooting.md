@@ -31,32 +31,11 @@ kubectl logs -n causa-rca -l app=causa-backend
 # Verify MCP env vars were stamped correctly
 kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
 
-# Health check (Causa Backend is a ClusterIP service — port-forward first)
-kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca &
+# Health check (Kind — NodePort)
 curl http://localhost:30001/q/health/ready
-```
 
-### Jafra Ecosystem
-
-```bash
-# Controller
-kubectl get pods -n causa-rca -l app=jafra-controller
-kubectl logs -n causa-rca -l app=jafra-controller
-
-# Analyzer
-kubectl get pods -n causa-rca -l app=jafra-analyzer
-kubectl logs -n causa-rca -l app=jafra-analyzer
-
-# Agent (DaemonSet)
-kubectl get pods -n causa-rca -l app=jafra-agent
-kubectl logs -n causa-rca -l app=jafra-agent
-```
-
-### Jafra MCP Server
-
-```bash
-kubectl get pods -n causa-rca -l app=jafra-mcp
-kubectl logs -n causa-rca -l app=jafra-mcp
+# Health check (OpenShift — via Route)
+curl https://$(oc get route causa-backend -n causa-rca -o jsonpath='{.spec.host}')/q/health/ready
 ```
 
 ### Quarkus MCP Server
@@ -76,12 +55,41 @@ kubectl logs -n causa-rca -l app=causa-mcp
 ### PostgreSQL
 
 ```bash
+# Kind
 kubectl get pods -n causa-rca -l app=postgres
 kubectl logs -n causa-rca -l app=postgres
 
 # Verify secrets exist
 kubectl get secret causa-db-secrets -n causa-rca
 kubectl get secret postgres-credentials -n causa-rca
+
+# OpenShift (CloudNativePG)
+oc get cluster.postgresql.cnpg.io iri-db -n causa-rca
+oc get pods -n causa-rca -l cnpg.io/cluster=iri-db
+oc get secret causa-db-secrets -n causa-rca
+```
+
+### Jafra Ecosystem (Kind only)
+
+```bash
+# Controller
+kubectl get pods -n causa-rca -l app=jafra-controller
+kubectl logs -n causa-rca -l app=jafra-controller
+
+# Analyzer
+kubectl get pods -n causa-rca -l app=jafra-analyzer
+kubectl logs -n causa-rca -l app=jafra-analyzer
+
+# Agent (DaemonSet)
+kubectl get pods -n causa-rca -l app=jafra-agent
+kubectl logs -n causa-rca -l app=jafra-agent
+```
+
+### Jafra MCP Server (Kind only)
+
+```bash
+kubectl get pods -n causa-rca -l app=jafra-mcp
+kubectl logs -n causa-rca -l app=jafra-mcp
 ```
 
 ### Kind cluster
@@ -92,11 +100,40 @@ kubectl cluster-info --context kind-causa-rca
 kubectl get nodes
 ```
 
+### OpenShift monitoring
+
+```bash
+# Check User Workload Monitoring is enabled
+oc get configmap cluster-monitoring-config -n openshift-monitoring -o yaml
+
+# Check UWM Prometheus is running
+oc get pods -n openshift-user-workload-monitoring
+
+# Check which Alertmanager topology is present
+oc get statefulset alertmanager-user-workload -n openshift-user-workload-monitoring 2>/dev/null \
+  && echo "Topology A: UWM Alertmanager" || echo "Topology B: platform Alertmanager only"
+
+# Verify causa-webhook is configured (Topology A)
+oc get secret alertmanager-user-workload -n openshift-user-workload-monitoring \
+  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep causa-webhook
+
+# Verify causa-webhook is configured (Topology B)
+oc get secret alertmanager-main -n openshift-monitoring \
+  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep causa-webhook
+
+# Check PrometheusRule
+oc get prometheusrule -n causa-rca
+```
+
 ## Common errors
 
 ### Prerequisites missing
 
-The installer checks for `kubectl`, `docker`/`podman`, `kind`, `helm`, `curl`, `grep`, `sed`, and `awk` before doing anything. Install any missing tools and rerun.
+The installer checks for required CLI tools before doing anything. Install any missing tools and rerun. OpenShift Alertmanager Topology B additionally requires `python3` with the `yaml` module — the installer does not check for this and will fail mid-run if it is absent; install it before running.
+
+**Kind:** `kubectl`, `docker`/`podman`, `kind`, `helm`, `curl`, `grep`, `sed`, `awk`
+
+**OpenShift:** `oc` (or `kubectl`), `curl`, `grep`, `sed`, `awk`, `python3`
 
 ```bash
 # kind — macOS
@@ -106,9 +143,12 @@ brew install kind
 # helm
 brew install helm
 # or see https://helm.sh/docs/intro/install/
+
+# PyYAML (required for OpenShift Alertmanager merge)
+pip3 install pyyaml
 ```
 
-### Container runtime not running
+### Container runtime not running (Kind only)
 
 ```bash
 # Docker — macOS: start Docker Desktop from the menu bar
@@ -119,7 +159,7 @@ sudo systemctl start docker
 podman machine start
 ```
 
-### Podman rootless mode
+### Podman rootless mode (Kind only)
 
 Kind requires rootful Podman. Recreate the machine with rootful mode:
 
@@ -133,44 +173,84 @@ podman machine start
 ### Cluster not reachable
 
 ```bash
-# Verify the cluster exists
+# Kind — verify the cluster exists
 kind get clusters
 
-# Switch to the correct context
+# Kind — switch to the correct context
 kubectl config use-context kind-causa-rca
 
-# Recreate if needed
+# Kind — recreate if needed
 kind delete cluster --name causa-rca
 ./install.sh
+
+# OpenShift — verify you are logged in
+oc whoami
+oc login <api-url> --token=<token>
 ```
 
-### Ports already in use — 30000, 30001, 30004, 30005
+### cert-manager not installed
+
+**Kind:** cert-manager is installed automatically by the installer in step 3 (required by the Jafra Controller webhook). If it fails to become ready, check its pods:
+
+```bash
+# Check cert-manager pod status
+kubectl get pods -n cert-manager
+
+# Check for events indicating why it's not ready
+kubectl describe pods -n cert-manager
+kubectl get events -n cert-manager --sort-by='.lastTimestamp'
+
+# Check rollout status
+kubectl rollout status deployment/cert-manager -n cert-manager
+kubectl rollout status deployment/cert-manager-webhook -n cert-manager
+```
+
+If the webhook pod is stuck, delete it to force a restart:
+
+```bash
+kubectl delete pod -n cert-manager -l app=cert-manager-webhook
+```
+
+**OpenShift:** cert-manager must be pre-installed before running the installer. If the pre-flight check fails:
+
+```bash
+# Verify cert-manager pods
+oc get pods -A | grep cert-manager
+
+# Install if missing
+oc apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# Wait for it to be ready
+oc rollout status deployment/cert-manager -n cert-manager
+oc rollout status deployment/cert-manager-webhook -n cert-manager
+```
+
+### Insufficient permissions for Alertmanager (OpenShift Topology B)
+
+Patching `alertmanager-main` in `openshift-monitoring` requires cluster-admin.
+
+```bash
+# Re-run after logging in with a cluster-admin account
+oc login --username=<admin-user> --server=<api-url>
+./install.sh --target openshift
+```
+
+### Ports already in use — 30000, 30001, 30004, 30005 (Kind only)
 
 The pre-flight check verifies the required host ports are free before installing. Which ports
 are checked depends on the port's role:
 
 **Which ports are checked, and when**
 
-| Port  | Service        | Role                                          | When it's checked    |
-|-------|----------------|-----------------------------------------------|----------------------|
-| 30000 | Kubernetes MCP | NodePort mapped to `localhost`                | New cluster only     |
-| 30004 | Quarkus MCP    | NodePort mapped to `localhost`                | New cluster only     |
-| 30001 | Causa Backend  | ClusterIP, reached via `kubectl port-forward` | Create **and** reuse |
-| 30005 | Causa MCP      | ClusterIP, reached via `kubectl port-forward` | Create **and** reuse |
-| 30003 | Jafra MCP      | NodePort, in-cluster only (not host-mapped)   | Never                |
+| Port  | Service        | Role                           | When it's checked    |
+|-------|----------------|-------------------------------|----------------------|
+| 30000 | Kubernetes MCP | NodePort mapped to `localhost` | New cluster only     |
+| 30001 | Causa Backend  | NodePort mapped to `localhost` | New cluster only     |
+| 30004 | Quarkus MCP    | NodePort mapped to `localhost` | New cluster only     |
+| 30005 | Causa MCP      | NodePort mapped to `localhost` | New cluster only     |
+| 30003 | Jafra MCP      | NodePort, in-cluster only      | Never                |
 
-**How to fix a conflict**
-
-If 30001 or 30005 is in use, it is usually a leftover `kubectl port-forward` from a previous
-session (the installer never starts these itself). Stop it, then re-run:
-
-```bash
-# Find and stop a lingering port-forward on 30001 / 30005
-pkill -f "port-forward.*causa"
-# or kill the specific PID from the error message, e.g. kill 40308
-```
-
-If 30000 or 30004 is in use after deleting a cluster, it is usually a stale gvproxy lease:
+After deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold the host port bindings.
 
 ```bash
 # Option 1 — restart the container runtime
@@ -183,7 +263,7 @@ podman machine stop && podman machine start
 
 ### Pod stuck in `Pending`
 
-Usually a resource or scheduling issue on the Kind node.
+Usually a resource or scheduling issue on the node.
 
 ```bash
 kubectl describe pod -n causa-rca <pod-name>
@@ -192,19 +272,28 @@ kubectl get events -n causa-rca --sort-by='.lastTimestamp'
 
 ### PostgreSQL not ready
 
-The Causa Backend waits for PostgreSQL before starting. Check:
-
+**Kind:**
 ```bash
 kubectl get pods -n causa-rca -l app=postgres
 kubectl describe pod -n causa-rca -l app=postgres
-
-# Ensure the secret was created
 kubectl get secret postgres-credentials -n causa-rca
+```
+
+**OpenShift (CloudNativePG):**
+```bash
+# Check cluster phase
+oc get cluster.postgresql.cnpg.io iri-db -n causa-rca -o jsonpath='{.status.phase}'
+
+# Check CNPG operator is running
+oc get pods -A | grep cnpg
+
+# Check the CNPG subscription
+oc get subscription cloudnative-pg -n causa-rca
 ```
 
 ### Causa Backend env vars not set
 
-After install, verify the three MCP endpoint env vars were stamped:
+After install, verify the MCP endpoint env vars were stamped:
 
 ```bash
 kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
@@ -235,16 +324,6 @@ kubectl describe pods -n causa-rca -l app=causa-backend
 
 # Check readiness/liveness probe failures
 kubectl logs -n causa-rca -l app=causa-backend --previous
-```
-
-### Jafra cert-manager not ready
-
-The Jafra Controller requires cert-manager. If it fails:
-
-```bash
-kubectl get pods -n cert-manager
-kubectl rollout status deployment/cert-manager -n cert-manager
-kubectl rollout status deployment/cert-manager-webhook -n cert-manager
 ```
 
 ## Logs

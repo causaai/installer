@@ -16,22 +16,25 @@ lib/
   validator.sh                          ← pre-flight checks (tools, container runtime, cluster)
   install_kind_cluster.sh               ← Kind cluster + local registry (kind only)
   install_prometheus.sh                 ← Prometheus Stack via Helm (kind only)
-  install_cert_manager.sh               ← cert-manager via official release manifest (kind only, required by Jafra)
+  enable_monitoring.sh                  ← OpenShift UWM + Alertmanager webhook config (openshift only)
+  install_cert_manager.sh               ← cert-manager via official release manifest (kind only)
   install_k8s_mcp.sh                    ← Kubernetes MCP Server
-  install_jafra.sh                      ← Jafra Ecosystem (Controller + Analyzer + Agent)
-  install_jafra_mcp.sh                  ← Jafra MCP Server
+  install_jafra.sh                      ← Jafra Ecosystem (kind only)
+  install_jafra_mcp.sh                  ← Jafra MCP Server (kind only)
   install_quarkus_mcp.sh                ← Quarkus MCP Server
-  install_postgres.sh                   ← PostgreSQL + pgvector + Kubernetes secrets
+  install_postgres.sh                   ← PostgreSQL — standalone Deployment (kind) / CloudNativePG (openshift)
   install_causa.sh                      ← Causa Backend
   install_causa_mcp.sh                  ← Causa MCP Server
 manifests/
   k8s_mcp_server.yaml                   ← Kubernetes MCP Server (NodePort 30000)
-  causa/deployment.yaml                 ← Causa Backend (ClusterIP, port-forward 30001:8080)
-  jafra/                                ← Jafra Controller, Analyzer, Agent
-  jafra_mcp/deployment.yaml             ← Jafra MCP Server (NodePort 30003, Kind node only)
+  causa/deployment.yaml                 ← Causa Backend (NodePort 30001, kind)
+  jafra/                                ← Jafra Ecosystem (kind only)
+  jafra_mcp/deployment.yaml             ← Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/deployment.yaml           ← Quarkus MCP Server (NodePort 30004)
-  causa_mcp/deployment.yaml             ← Causa MCP Server (ClusterIP, port-forward 30005:8081)
-  postgres/deployment.yaml              ← PostgreSQL + pgvector (ClusterIP)
+  causa_mcp/deployment.yaml             ← Causa MCP Server (NodePort 30005)
+  postgres/                             ← kind Deployment + OpenShift CNPG operator manifests
+  openshift/                            ← OpenShift-specific manifests (Routes, Causa Backend, monitoring)
+  prometheus/                           ← PrometheusRule (applied on both targets)
 ```
 
 ## Startup sequence
@@ -44,6 +47,24 @@ When `install.sh` is run:
 4. Runs pre-flight validation (container runtime, tools, cluster access)
 5. Deploys components in sequence (see [Installation order](installation.md#installation-order))
 6. Runs post-installation health check and prints the access summary
+
+## Target-specific behaviour
+
+The `--target` flag (default: `kind`) controls which infrastructure steps run:
+
+| Step | Kind | OpenShift |
+|---|---|---|
+| Cluster provisioning | Creates Kind cluster + local registry | Skipped — connects to existing cluster |
+| Prometheus | Installs kube-prometheus-stack via Helm | Skipped — uses built-in UWM |
+| cert-manager | Installs from official release manifest | Must be pre-installed (validated before deploy) |
+| Alertmanager webhook | Configured via kube-prometheus-stack | Configured via UWM Secret or platform Alertmanager patch |
+| Jafra Ecosystem | Deployed (if images set) | Skipped — not supported |
+| Jafra MCP Server | Deployed (if image set) | Skipped — not supported |
+| PostgreSQL | Standalone Deployment + pgvector | CloudNativePG operator via OLM Subscription |
+| Causa Backend | NodePort Service | Deployment + OpenShift Route |
+| Kubernetes MCP Server | NodePort Service | Deployment + OpenShift Route |
+| Quarkus MCP Server | NodePort Service | ClusterIP (OpenShift) |
+| Causa MCP Server | NodePort Service | Deployment + OpenShift Route |
 
 ## Image resolution
 
@@ -67,6 +88,8 @@ The validator detects the available container runtime automatically:
 
 ## PostgreSQL setup
 
+### Kind — standalone Deployment
+
 `install_postgres.sh` deploys two Kubernetes Secrets before starting the workload:
 
 | Secret | Keys |
@@ -75,6 +98,21 @@ The validator detects the available container runtime automatically:
 | `causa-db-secrets` | `CAUSA_DB_USERNAME`, `CAUSA_DB_PASSWORD`, `CAUSA_DB_URL` (read by Causa Backend) |
 
 The pgvector extension is initialised at startup via a ConfigMap-mounted SQL script.
+
+### OpenShift — CloudNativePG operator
+
+`install_postgres.sh` installs the CloudNativePG operator via OLM (Subscription + InstallPlan approval), then applies the `iri-db` Cluster CRD. Once the cluster is healthy, credentials are read from the CNPG-generated `iri-db-app` Secret and re-exposed as the `causa-db-secrets` Secret that Causa Backend reads.
+
+## OpenShift monitoring
+
+On OpenShift, `enable_monitoring.sh` handles Prometheus integration instead of installing a separate stack:
+
+1. Enables User Workload Monitoring (UWM) by patching `cluster-monitoring-config`
+2. Detects the Alertmanager topology:
+   - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): configures it directly via its own Secret
+   - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `causa-webhook` receiver into the existing config using `python3` + PyYAML
+3. Applies a `PrometheusRule` with Causa alert definitions
+4. Applies a `NetworkPolicy` allowing Alertmanager and the OpenShift ingress router to reach Causa Backend on port 8080
 
 ## Causa Backend — MCP endpoint configuration
 
@@ -99,7 +137,7 @@ Each manifest contains placeholder tokens that are substituted at apply time usi
 | Placeholder | Replaced with |
 |---|---|
 | `PLACEHOLDER_NAMESPACE` | `INSTALL_NAMESPACE` |
-| `PLACEHOLDER_CLUSTER_TYPE` | `INSTALL_TARGET` (e.g. `kind`) |
+| `PLACEHOLDER_CLUSTER_TYPE` | `INSTALL_TARGET` (e.g. `kind` or `openshift`) |
 | `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` (may be empty) |
 
 The standard `apply_manifest` helper in `lib/install_utils.sh` handles `PLACEHOLDER_NAMESPACE`
@@ -111,3 +149,6 @@ applied automatically for the Causa Backend manifests during installation.
 The Jafra Ecosystem, Jafra MCP Server, and Quarkus MCP Server are deployed only when their
 images are set in `lib/images.env`. If any required image variable is empty, the installer
 skips that component with a warning rather than failing.
+
+Jafra (Ecosystem + MCP Server) is additionally gated by target: these components are
+**skipped entirely on OpenShift** regardless of image settings.
