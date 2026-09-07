@@ -13,7 +13,7 @@
 #
 #   Topology B — Platform Alertmanager only (this cluster):
 #     Only alertmanager-main in openshift-monitoring exists.  We patch
-#     alertmanager-main to add the causa-webhook receiver, preserving all
+#     alertmanager-main to add the Critical receiver, preserving all
 #     existing routes and receivers.
 #
 # This script auto-detects which topology is present and acts accordingly.
@@ -151,53 +151,33 @@ _ocp_enable_user_workload_monitoring() {
 ################################################################################
 # _ocp_configure_uwm_alertmanager
 # Topology A: configure the dedicated UWM Alertmanager via its own Secret.
+# Reads manifests/prometheus/alertmanager-secret.yaml, substitutes the three
+# placeholders, then applies it directly with kubectl apply -f 
 ################################################################################
 _ocp_configure_uwm_alertmanager() {
     local webhook_url; webhook_url=$(_ocp_causa_alertmanager_webhook_url)
+    local am_secret="${SCRIPT_DIR}/manifests/prometheus/alertmanager-secret.yaml"
+
+    if [[ ! -f "${am_secret}" ]]; then
+        log_error "Alertmanager Secret manifest not found: ${am_secret}"
+        return 1
+    fi
+
     local tmp; tmp=$(mktemp /tmp/causa-ocp-alertmanager-XXXXXX.yaml)
+    sed -e "s|PLACEHOLDER_NAMESPACE|${OCP_UWM_NAMESPACE}|g" \
+        -e "s|PLACEHOLDER_ALERTMANAGER_SECRET_NAME|${OCP_UWM_ALERTMANAGER_SECRET#alertmanager-}|g" \
+        -e "s|PLACEHOLDER_WEBHOOK_URL|${webhook_url}|g" \
+        "${am_secret}" > "${tmp}"
 
-    cat > "${tmp}" << YAML
-global:
-  resolve_timeout: 5m
-route:
-  # Default: everything not explicitly matched below goes nowhere —
-  # only Causa's own PrometheusRule alerts (see child route) reach the webhook.
-  receiver: "null"
-  group_by: ['namespace', 'alertname', 'pod']
-  group_wait: 30s
-  group_interval: 5m
-  repeat_interval: 12h
-  routes:
-    # Only alerts fired by Causa's PrometheusRule (CausaApp*) go to the webhook.
-    - matchers:
-        - alertname =~ "CausaApp.*"
-      receiver: causa-webhook
-      group_by: ['namespace', 'alertname', 'pod']
-      group_wait: 10s
-      group_interval: 1m
-      repeat_interval: 15m
-receivers:
-  - name: causa-webhook
-    webhook_configs:
-      - url: "${webhook_url}"
-        send_resolved: true
-        http_config: {}
-  - name: "null"
-YAML
-
-    write_to_log_file "INFO" "Configuring UWM Alertmanager (alertmanager-user-workload Secret)..."
-    if ! ${KUBE_CLI} create secret generic "${OCP_UWM_ALERTMANAGER_SECRET}" \
-            --from-file=alertmanager.yaml="${tmp}" \
-            -n "${OCP_UWM_NAMESPACE}" \
-            --dry-run=client -o yaml \
-            | ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1; then
+    write_to_log_file "INFO" "Configuring UWM Alertmanager (${OCP_UWM_ALERTMANAGER_SECRET} Secret)..."
+    if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
         rm -f "${tmp}"
         log_error "Failed to apply UWM Alertmanager configuration Secret"
         return 1
     fi
 
     rm -f "${tmp}"
-    write_to_log_file "SUCCESS" "UWM Alertmanager configured with causa-webhook receiver"
+    write_to_log_file "SUCCESS" "UWM Alertmanager configured with Critical receiver"
     write_to_log_file "INFO"    "Webhook → ${webhook_url}"
     return 0
 }
@@ -206,8 +186,8 @@ YAML
 # _ocp_configure_platform_alertmanager
 # Topology B: patch alertmanager-main in openshift-monitoring.
 #
-# We READ the existing config, inject the causa-webhook receiver and a route
-# that matches alerts from the install namespace, then write it back.
+# We READ the existing config, inject the Critical receiver and a causa-.*
+# child route, then write it back.
 # All pre-existing receivers and routes are preserved.
 ################################################################################
 _ocp_configure_platform_alertmanager() {
@@ -229,19 +209,25 @@ _ocp_configure_platform_alertmanager() {
 
     write_to_log_file "INFO" "Read existing platform Alertmanager config (${#existing_config} bytes)"
 
-    # Check if causa-webhook is already present — idempotent
-    if echo "${existing_config}" | grep -q "causa-webhook"; then
-        write_to_log_file "INFO" "causa-webhook receiver already present in platform Alertmanager — skipping"
+    # Check if Critical receiver is already present — idempotent
+    if echo "${existing_config}" | grep -q "name: Critical"; then
+        write_to_log_file "INFO" "Critical receiver already present in platform Alertmanager — skipping"
         return 0
     fi
 
     # Build the merged config:
-    # Append the causa-webhook receiver to the receivers list and add a
-    # child route that matches only Causa's own PrometheusRule alerts.
+    # Append the Critical receiver to the receivers list and add a
+    # child route that matches causa-* alerts.
     local tmp_cfg; tmp_cfg=$(mktemp /tmp/causa-ocp-am-config-XXXXXX.yaml)
 
     # Use Python with PyYAML to safely merge the YAML.
     # Both python3 and the yaml module are required; fail fast if either is absent.
+    local am_secret="${SCRIPT_DIR}/manifests/prometheus/alertmanager-secret.yaml"
+    if [[ ! -f "${am_secret}" ]]; then
+        log_error "Alertmanager Secret manifest not found: ${am_secret}"
+        return 1
+    fi
+
     if command -v python3 &>/dev/null && python3 -c 'import yaml' &>/dev/null; then
         # Write existing config to a temp file — we cannot use both a pipe and
         # a heredoc to the same python3 process (heredoc wins, pipe is ignored).
@@ -251,9 +237,10 @@ _ocp_configure_platform_alertmanager() {
         python3 << PYEOF
 import sys, yaml
 
-in_path   = "${tmp_in}"
-out_path  = "${tmp_cfg}"
-webhook   = "${webhook_url}"
+in_path    = "${tmp_in}"
+out_path   = "${tmp_cfg}"
+am_secret  = "${am_secret}"
+webhook    = "${webhook_url}"
 
 with open(in_path) as f:
     cfg = yaml.safe_load(f.read())
@@ -261,31 +248,32 @@ with open(in_path) as f:
 if cfg is None:
     cfg = {}
 
-# Add causa-webhook receiver
-cfg.setdefault("receivers", [])
-cfg["receivers"].append({
-    "name": "causa-webhook",
-    "webhook_configs": [{
-        "url": webhook,
-        "send_resolved": True,
-        "http_config": {}
-    }]
-})
+# Read the Alertmanager config from inside the Secret manifest's stringData block,
+# substituting the webhook URL placeholder before parsing.
+with open(am_secret) as f:
+    secret_doc = yaml.safe_load(f.read().replace("PLACEHOLDER_WEBHOOK_URL", webhook))
+causa_cfg = yaml.safe_load(secret_doc["stringData"]["alertmanager.yaml"])
 
-# Inject a child route scoped to Causa's own PrometheusRule alerts only
+# Add Critical receiver from the manifest file
+causa_receiver = next(
+    (r for r in causa_cfg.get("receivers", []) if r.get("name") == "Critical"),
+    None
+)
+if causa_receiver:
+    cfg.setdefault("receivers", [])
+    cfg["receivers"].append(causa_receiver)
+
+# Inject the causa child route from the manifest file
 # (inserted first so it takes precedence over the default catch-all route).
-# Matching by alertname rather than namespace ensures unrelated alerts about
-# other workloads in this namespace are NOT sent to Causa.
-route = cfg.setdefault("route", {})
-routes = route.setdefault("routes", [])
-routes.insert(0, {
-    "matchers": ['alertname =~ "CausaApp.*"'],
-    "receiver": "causa-webhook",
-    "group_by":        ["namespace", "alertname", "pod"],
-    "group_wait":      "10s",
-    "group_interval":  "1m",
-    "repeat_interval": "15m"
-})
+causa_route = next(
+    (r for r in causa_cfg.get("route", {}).get("routes", [])
+     if r.get("receiver") == "Critical"),
+    None
+)
+if causa_route:
+    route = cfg.setdefault("route", {})
+    routes = route.setdefault("routes", [])
+    routes.insert(0, causa_route)
 
 with open(out_path, "w") as f:
     yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
@@ -310,7 +298,7 @@ PYEOF
         return 1
     fi
 
-    write_to_log_file "INFO" "Patching platform Alertmanager Secret with causa-webhook..."
+    write_to_log_file "INFO" "Patching platform Alertmanager Secret with Critical receiver..."
     if ! ${KUBE_CLI} create secret generic "${secret}" \
             --from-file=alertmanager.yaml="${tmp_cfg}" \
             -n "${ns}" \
@@ -322,14 +310,17 @@ PYEOF
     fi
 
     rm -f "${tmp_cfg}"
-    write_to_log_file "SUCCESS" "Platform Alertmanager patched with causa-webhook receiver"
+    write_to_log_file "SUCCESS" "Platform Alertmanager patched with Critical receiver"
     write_to_log_file "INFO"    "Webhook → ${webhook_url}"
     return 0
 }
 
 ################################################################################
 # _ocp_apply_prometheus_rule
-# Applies the PrometheusRule manifest to the install namespace.
+# Deploys the PrometheusRule to openshift-monitoring so the platform Prometheus
+# (prometheus-k8s) picks it up
+# The PromQL expressions inside the rule still filter on PLACEHOLDER_NAMESPACE
+# (the install namespace) to scope alerts to Causa workloads only.
 ################################################################################
 _ocp_apply_prometheus_rule() {
     local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
@@ -340,12 +331,14 @@ _ocp_apply_prometheus_rule() {
         return 0
     fi
 
-    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${INSTALL_NAMESPACE}"
-    if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}"; then
+    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${OCP_MONITORING_NAMESPACE} (rule), metrics scoped to: ${INSTALL_NAMESPACE}"
+    # arg 2 = PLACEHOLDER_NAMESPACE (install ns — used in PromQL filters)
+    # arg 5 = PLACEHOLDER_RULE_NAMESPACE (openshift-monitoring — where the rule lives)
+    if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}" "" "" "${OCP_MONITORING_NAMESPACE}"; then
         log_error "Failed to apply PrometheusRule"
         return 1
     fi
-    write_to_log_file "SUCCESS" "PrometheusRule applied to namespace: ${INSTALL_NAMESPACE}"
+    write_to_log_file "SUCCESS" "PrometheusRule applied to namespace: ${OCP_MONITORING_NAMESPACE}"
     return 0
 }
 
@@ -353,62 +346,16 @@ _ocp_apply_prometheus_rule() {
 # _ocp_apply_network_policy
 # Allows Alertmanager (platform or UWM namespace) and the OpenShift ingress
 # router to reach Causa Backend on port 8080.
+# Uses the shared manifests/prometheus/networkpolicy.yaml
 ################################################################################
 _ocp_apply_network_policy() {
     write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager + ingress → Causa Backend..."
 
-    local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
-
-    # Allow from:
-    #   1. Both possible Alertmanager namespaces (platform + UWM) — topology-agnostic.
-    #   2. causa-mcp in the same namespace.
-    #   3. openshift-ingress — the HAProxy router namespace. Without this rule
-    #      the router cannot reach the pod and returns HTTP 503 to external callers.
-    cat > "${tmp}" << EOF
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-alertmanager-to-causa-backend
-  namespace: ${INSTALL_NAMESPACE}
-spec:
-  podSelector:
-    matchLabels:
-      app: causa-backend
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ${OCP_MONITORING_NAMESPACE}
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ${OCP_UWM_NAMESPACE}
-      ports:
-        - protocol: TCP
-          port: 8080
-    - from:
-        - podSelector:
-            matchLabels:
-              app: causa-mcp
-      ports:
-        - protocol: TCP
-          port: 8080
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openshift-ingress
-      ports:
-        - protocol: TCP
-          port: 8080
-EOF
-
-    if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
-        rm -f "${tmp}"
+    local manifest="${SCRIPT_DIR}/manifests/prometheus/networkpolicy.yaml"
+    if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}"; then
         log_error "Failed to apply NetworkPolicy for Alertmanager and causa-mcp"
         return 1
     fi
-    rm -f "${tmp}"
     write_to_log_file "SUCCESS" "NetworkPolicy applied (Alertmanager and causa-mcp → Causa Backend on port 8080)"
     return 0
 }
@@ -483,7 +430,7 @@ disable_monitoring() {
         --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
     write_to_log_file "INFO" "UWM Alertmanager Secret removed (or was absent)"
 
-    # For platform Alertmanager: restore original config (remove causa-webhook receiver).
+    # For platform Alertmanager: restore original config (remove Critical receiver).
     # We do this by re-reading the current secret and stripping the causa additions.
     if ${KUBE_CLI} get secret "${OCP_PLATFORM_ALERTMANAGER_SECRET}" \
             -n "${OCP_MONITORING_NAMESPACE}" &>/dev/null; then
@@ -491,7 +438,7 @@ disable_monitoring() {
         existing=$(${KUBE_CLI} get secret "${OCP_PLATFORM_ALERTMANAGER_SECRET}" \
             -n "${OCP_MONITORING_NAMESPACE}" \
             -o jsonpath='{.data.alertmanager\.yaml}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
-        if echo "${existing}" | grep -q "causa-webhook"; then
+        if echo "${existing}" | grep -q "name: Critical"; then
             if command -v python3 &>/dev/null; then
                 local tmp_clean; tmp_clean=$(mktemp /tmp/causa-ocp-am-clean-XXXXXX.yaml)
                 local tmp_existing; tmp_existing=$(mktemp /tmp/causa-ocp-am-existing-XXXXXX.yaml)
@@ -505,12 +452,12 @@ out_path = "${tmp_clean}"
 with open(in_path) as f:
     cfg = yaml.safe_load(f.read()) or {}
 
-# Remove causa-webhook receiver
-cfg["receivers"] = [r for r in cfg.get("receivers", []) if r.get("name") != "causa-webhook"]
+# Remove Critical receiver added by Causa
+cfg["receivers"] = [r for r in cfg.get("receivers", []) if r.get("name") != "Critical"]
 
-# Remove causa-webhook child routes
+# Remove causa child routes added by Causa
 route = cfg.get("route", {})
-route["routes"] = [r for r in route.get("routes", []) if r.get("receiver") != "causa-webhook"]
+route["routes"] = [r for r in route.get("routes", []) if r.get("receiver") != "Critical"]
 
 with open(out_path, "w") as f:
     yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
@@ -522,26 +469,21 @@ PYEOF
                         -n "${OCP_MONITORING_NAMESPACE}" \
                         --dry-run=client -o yaml \
                         | ${KUBE_CLI} apply -f - >>"${LOG_FILE}" 2>&1 || true
-                    write_to_log_file "INFO" "Platform Alertmanager restored (causa-webhook removed)"
+                    write_to_log_file "INFO" "Platform Alertmanager restored (Critical receiver removed)"
                 fi
                 rm -f "${tmp_clean}"
             else
                 write_to_log_file "WARN" "python3 not found — cannot automatically restore platform Alertmanager config"
-                write_to_log_file "WARN" "Remove the causa-webhook receiver manually from secret '${OCP_PLATFORM_ALERTMANAGER_SECRET}' in '${OCP_MONITORING_NAMESPACE}'"
+                write_to_log_file "WARN" "Remove the Critical receiver manually from secret '${OCP_PLATFORM_ALERTMANAGER_SECRET}' in '${OCP_MONITORING_NAMESPACE}'"
             fi
         fi
     fi
 
-    # Remove PrometheusRule
-    local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
-    local manifest="${prom_dir}/prometheusrule.yaml"
-    if [[ -f "${manifest}" ]]; then
-        local tmp; tmp=$(mktemp /tmp/causa-ocp-prom-rule-XXXXXX.yaml)
-        sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
-        ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
-        rm -f "${tmp}"
-        write_to_log_file "INFO" "PrometheusRule removed (or was absent)"
-    fi
+    # Remove PrometheusRule from openshift-monitoring (where it was deployed)
+    ${KUBE_CLI} delete prometheusrule causa-rca-alerts \
+        -n "${OCP_MONITORING_NAMESPACE}" \
+        --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+    write_to_log_file "INFO" "PrometheusRule removed (or was absent)"
 
     # Remove NetworkPolicy
     ${KUBE_CLI} delete networkpolicy allow-alertmanager-to-causa-backend \

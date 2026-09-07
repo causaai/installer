@@ -110,7 +110,7 @@ On OpenShift, `enable_monitoring.sh` handles Prometheus integration instead of i
 1. Enables User Workload Monitoring (UWM) by patching `cluster-monitoring-config`
 2. Detects the Alertmanager topology:
    - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): configures it directly via its own Secret
-   - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `causa-webhook` receiver into the existing config using `python3` + PyYAML
+   - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `Critical` receiver into the existing config using `python3` + PyYAML
 3. Applies a `PrometheusRule` with Causa alert definitions
 4. Applies a `NetworkPolicy` allowing Alertmanager and the OpenShift ingress router to reach Causa on port 8080
 
