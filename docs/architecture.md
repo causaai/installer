@@ -34,7 +34,7 @@ manifests/
   causa_mcp/deployment.yaml             ← Causa MCP Server (NodePort 30005)
   postgres/                             ← kind Deployment + OpenShift CNPG operator manifests
   openshift/                            ← OpenShift-specific manifests (Routes, Causa Backend, monitoring)
-  prometheus/                           ← PrometheusRule (applied on both targets)
+  prometheus/                           ← PrometheusRule + NetworkPolicy (both targets), Alertmanager Secret (openshift only)
 ```
 
 ## Startup sequence
@@ -109,10 +109,10 @@ On OpenShift, `enable_monitoring.sh` handles Prometheus integration instead of i
 
 1. Enables User Workload Monitoring (UWM) by patching `cluster-monitoring-config`
 2. Detects the Alertmanager topology:
-   - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): configures it directly via its own Secret
-   - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `Critical` receiver into the existing config using `python3` + PyYAML
-3. Applies a `PrometheusRule` with Causa alert definitions
-4. Applies a `NetworkPolicy` allowing Alertmanager and the OpenShift ingress router to reach Causa on port 8080
+   - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): applies `manifests/prometheus/alertmanager-secret.yaml` in full to `openshift-user-workload-monitoring`; deploys `PrometheusRule` to `openshift-user-workload-monitoring`
+   - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `causa-critical` receiver into the existing config using `python3` + PyYAML; deploys `PrometheusRule` to `openshift-monitoring`
+3. Applies a `PrometheusRule` (`causa-rca-alerts`) with 3 alert rules — deployed to the topology-appropriate namespace so the correct Prometheus picks it up. Alerts are cluster-scoped; opt-in is via the `causa.ai/monitoring: "true"` pod label.
+4. Applies a `NetworkPolicy` allowing Alertmanager namespaces, OpenShift ingress router, and `causa-mcp` to reach Causa on port 8080
 
 ## Causa — MCP endpoint configuration
 
@@ -134,15 +134,16 @@ new configuration before proceeding.
 
 Each manifest contains placeholder tokens that are substituted at apply time using `sed`:
 
-| Placeholder | Replaced with |
-|---|---|
-| `PLACEHOLDER_NAMESPACE` | `INSTALL_NAMESPACE` |
-| `PLACEHOLDER_CLUSTER_TYPE` | `INSTALL_TARGET` (e.g. `kind` or `openshift`) |
-| `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` (may be empty) |
+| Placeholder | Replaced with | Used in |
+|---|---|---|
+| `PLACEHOLDER_NAMESPACE` | `INSTALL_NAMESPACE` | All manifests — namespace for pods, services, PromQL filters |
+| `PLACEHOLDER_RULE_NAMESPACE` | Topology-dependent namespace | `prometheusrule.yaml` `metadata.namespace` only — `openshift-monitoring` (Topology B) or `openshift-user-workload-monitoring` (Topology A) on OpenShift; install namespace on Kind |
+| `PLACEHOLDER_CLUSTER_TYPE` | `INSTALL_TARGET` (e.g. `kind` or `openshift`) | Manifests that need target-specific values |
+| `PLACEHOLDER_ALERTMANAGER_SECRET_NAME` | `OCP_UWM_ALERTMANAGER_SECRET` | `alertmanager-secret.yaml` Secret name |
+| `PLACEHOLDER_WEBHOOK_URL` | Causa Backend webhook URL | `alertmanager-secret.yaml` receiver URL |
+| `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` | `CAUSA_MCP_QUARKUS_METRICS_BASE_URL` (may be empty) | Causa Backend deployment manifest |
 
-The standard `apply_manifest` helper in `lib/install_utils.sh` handles `PLACEHOLDER_NAMESPACE`
-and `PLACEHOLDER_CLUSTER_TYPE`. The `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` substitution is
-applied automatically for the Causa manifests during installation.
+The standard `apply_manifest` helper in `lib/install_utils.sh` handles `PLACEHOLDER_NAMESPACE`, `PLACEHOLDER_RULE_NAMESPACE`, and `PLACEHOLDER_CLUSTER_TYPE`. The remaining placeholders are substituted by their respective install scripts.
 
 ## Optional components
 

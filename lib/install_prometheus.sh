@@ -111,19 +111,19 @@ alertmanager:
         # Causa RCA alerts — all causa-* alerts go to the webhook receiver.
         - matchers:
             - alertname =~ "causa-.*"
-          receiver: Critical
+          receiver: causa-critical
           group_wait: 5s
           group_interval: 5s
         # Any other critical severity alert also goes to the webhook receiver.
         - matchers:
             - severity = "critical"
-          receiver: Critical
+          receiver: causa-critical
           group_wait: 30s
           group_interval: 5m
     receivers:
       - name: Default
       - name: Watchdog
-      - name: Critical
+      - name: causa-critical
         webhook_configs:
           - url: "${webhook_url}"
             send_resolved: false
