@@ -258,17 +258,21 @@ with open(am_secret) as f:
     secret_doc = yaml.safe_load(f.read().replace("PLACEHOLDER_WEBHOOK_URL", webhook))
 causa_cfg = yaml.safe_load(secret_doc["stringData"]["alertmanager.yaml"])
 
-# Add causa-critical receiver from the manifest file
+# Add causa-critical receiver from the manifest file.
+# Guard against duplicate names: if a receiver named causa-critical already
+# exists (with a different URL), skip
 causa_receiver = next(
     (r for r in causa_cfg.get("receivers", []) if r.get("name") == "causa-critical"),
     None
 )
-if causa_receiver:
+if causa_receiver and "causa-critical" not in existing_receiver_names:
     cfg.setdefault("receivers", [])
     cfg["receivers"].append(causa_receiver)
 
-# Inject the causa child route from the manifest file
-# (inserted first so it takes precedence over the default catch-all route).
+# Inject the causa child route from the manifest file.
+# Identified by the causa-.* matcher, not just the receiver name, so an
+# unrelated pre-existing route pointing to a receiver named causa-critical
+# is not treated as ours.
 causa_route = next(
     (r for r in causa_cfg.get("route", {}).get("routes", [])
      if r.get("receiver") == "causa-critical"),
@@ -487,9 +491,17 @@ def _has_causa_url(receiver):
 
 cfg["receivers"] = [r for r in cfg.get("receivers", []) if not _has_causa_url(r)]
 
-# Remove causa child routes — those pointing to causa-critical receiver.
+# Remove causa child routes — identified by the causa-.* matcher, not just the
+# receiver name, so unrelated routes pointing to a pre-existing receiver named
+# causa-critical are not deleted.
+def _is_causa_route(r):
+    for m in r.get("matchers", []):
+        if "causa-.*" in str(m):
+            return True
+    return False
+
 route = cfg.get("route", {})
-route["routes"] = [r for r in route.get("routes", []) if r.get("receiver") != "causa-critical"]
+route["routes"] = [r for r in route.get("routes", []) if not _is_causa_route(r)]
 
 with open(out_path, "w") as f:
     yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
@@ -511,15 +523,13 @@ PYEOF
         fi
     fi
 
-    # Remove PrometheusRule from whichever namespace it was deployed to
-    local rule_ns
-    if _ocp_uwm_alertmanager_present; then
-        rule_ns="${OCP_UWM_NAMESPACE}"
-    else
-        rule_ns="${OCP_MONITORING_NAMESPACE}"
-    fi
+    # Remove PrometheusRule from both possible namespaces — topology may have
+    # changed between install and uninstall  --ignore-not-found makes this safe when absent.
     ${KUBE_CLI} delete prometheusrule causa-rca-alerts \
-        -n "${rule_ns}" \
+        -n "${OCP_UWM_NAMESPACE}" \
+        --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+    ${KUBE_CLI} delete prometheusrule causa-rca-alerts \
+        -n "${OCP_MONITORING_NAMESPACE}" \
         --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
     write_to_log_file "INFO" "PrometheusRule removed (or was absent)"
 
