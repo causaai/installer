@@ -116,6 +116,7 @@ manifests/
 | [Configuration](docs/configuration.md) | All CLI flags, env vars, image overrides, and defaults |
 | [Architecture](docs/architecture.md) | How the installer works internally, component wiring |
 | [Troubleshooting](docs/troubleshooting.md) | Status checks, log locations, common errors |
+| [Jafra](docs/jafra.md) | Components, architecture diagram, pod opt-in, and analyzer storage guidance |
 
 ## Support
 
