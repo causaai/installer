@@ -58,7 +58,7 @@ The following components are installed on OpenShift:
 - Kubernetes MCP Server
 - Quarkus MCP Server
 - PostgreSQL via CloudNativePG operator
-- Causa Backend
+- Causa
 - Causa MCP Server
 - OpenShift User Workload Monitoring enabled + Alertmanager webhook configured
 
@@ -73,7 +73,7 @@ The following components are installed on OpenShift:
 
 ## Setting the target Quarkus app URL
 
-The Causa Backend connects to the Quarkus application under analysis via
+The Causa engine connects to the Quarkus application under analysis via
 `CAUSA_MCP_QUARKUS_METRICS_BASE_URL`. Set this before running the installer when
 you have a known target:
 
@@ -121,7 +121,7 @@ See [Configuration](configuration.md) for the full reference.
 6. Jafra MCP Server _(skipped if image not set)_
 7. Quarkus MCP Server _(skipped if image not set)_
 8. PostgreSQL + pgvector
-9. Causa Backend _(stamps MCP env vars + waits for rollout)_
+9. Causa _(stamps MCP env vars + waits for rollout)_
 10. Causa MCP Server
 
 ### OpenShift

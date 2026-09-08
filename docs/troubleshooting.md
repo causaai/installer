@@ -22,7 +22,7 @@ kubectl get pods -n causa-rca -l app=kubernetes-mcp-server
 kubectl logs -n causa-rca -l app=kubernetes-mcp-server
 ```
 
-### Causa Backend
+### Causa
 
 ```bash
 kubectl get pods -n causa-rca -l app=causa-backend
@@ -291,7 +291,7 @@ oc get pods -A | grep cnpg
 oc get subscription cloudnative-pg -n causa-rca
 ```
 
-### Causa Backend env vars not set
+### Causa env vars not set
 
 After install, verify the MCP endpoint env vars were stamped:
 
@@ -316,7 +316,7 @@ kubectl set env deployment/causa-backend -n causa-rca \
 kubectl rollout status deployment/causa-backend -n causa-rca --timeout=180s
 ```
 
-### Causa Backend rollout stuck after env var update
+### Causa rollout stuck after env var update
 
 ```bash
 # Check pod events
