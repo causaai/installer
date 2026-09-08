@@ -1,0 +1,157 @@
+# =============================================================================
+# causa-memory-alert-template.yaml  (Per-App Memory Alert Template)
+#
+# Render with envsubst before applying:
+#
+#   APP_NAME=liberty-perf APP_NAMESPACE=causa-rca MEMORY_THRESHOLD=0.80 \
+#     envsubst < templates/causa-memory-alert-template.yaml | oc apply -f -
+#
+# Variables:
+#   APP_NAME           — name of your application (used in label selectors)
+#   APP_NAMESPACE      — namespace where your app AND causa-backend are deployed
+#   MEMORY_THRESHOLD   — decimal fraction (0.0–1.0) at which the alert fires
+#
+# Onboarding Requirements for App Pods:
+#   1. Must have label: app=${APP_NAME}  (or app.kubernetes.io/name=${APP_NAME})
+#   2. Must have label: causa.ai/monitoring="true"
+# =============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${APP_NAME}-causa-memory-alerts
+  namespace: ${APP_NAMESPACE}
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+    app: ${APP_NAME}
+spec:
+  groups:
+  - name: ${APP_NAME}-causa-memory-alerts
+    interval: 30s
+    rules:
+    - alert: CausaApp${APP_NAME}HighMemoryUsage
+      expr: |
+        (
+          sum by (namespace, pod, container) (
+            container_memory_working_set_bytes{namespace="${APP_NAMESPACE}", container!="", container!="POD"}
+          )
+          /
+          sum by (namespace, pod, container) (
+            kube_pod_container_resource_limits{namespace="${APP_NAMESPACE}", resource="memory", container!="", container!="POD"}
+          )
+        ) > ${MEMORY_THRESHOLD}
+        and
+        on(namespace, pod) (
+          kube_pod_labels{
+            namespace="${APP_NAMESPACE}",
+            label_causa_ai_monitoring="true",
+            label_app="${APP_NAME}"
+          }
+          or
+          kube_pod_labels{
+            namespace="${APP_NAMESPACE}",
+            label_causa_ai_monitoring="true",
+            label_app_kubernetes_io_name="${APP_NAME}"
+          }
+        )
+      labels:
+        severity: critical
+        app: ${APP_NAME}
+      annotations:
+        summary: "Container {{ $labels.container }} in pod {{ $labels.pod }} (${APP_NAME}) is using {{ $value | humanizePercentage }} memory"
+        description: |
+          App: ${APP_NAME}
+          Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace {{ $labels.namespace }})
+          is currently using more memory than threshold ${MEMORY_THRESHOLD}.
+        diagnostic_hint: "high_memory_usage"
+        container_name: "{{ $labels.container }}"
+        pod_name: "{{ $labels.pod }}"
+        namespace: "{{ $labels.namespace }}"
+        workload_name: "{{ $labels.container }}"
+        app_name: "${APP_NAME}"
+        memory_threshold: "${MEMORY_THRESHOLD}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-main
+  namespace: openshift-monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      http_config:
+        proxy_from_environment: true
+      resolve_timeout: 5m
+
+    inhibit_rules:
+    - equal:
+      - namespace
+      - alertname
+      source_matchers:
+      - severity = "critical"
+      target_matchers:
+      - severity =~ "warning|info"
+    - equal:
+      - namespace
+      - alertname
+      source_matchers:
+      - severity = "warning"
+      target_matchers:
+      - severity = "info"
+
+    receivers:
+    - name: Default
+    - name: Watchdog
+    - name: Critical
+      webhook_configs:
+      - url: 'http://causa-backend.${APP_NAMESPACE}.svc.cluster.local:8080/api/v1/webhooks/alerts'
+        send_resolved: true
+        http_config:
+          follow_redirects: true
+
+    route:
+      group_by:
+      - namespace
+      group_interval: 5m
+      group_wait: 30s
+      receiver: Default
+      repeat_interval: 12h
+      routes:
+      - matchers:
+        - alertname = "Watchdog"
+        receiver: Watchdog
+      - matchers:
+        - alertname =~ "CausaApp.*"
+        receiver: Critical
+        group_wait: 5s
+        group_interval: 5s
+      - matchers:
+        - severity = "critical"
+        receiver: Critical
+        group_wait: 30s
+        group_interval: 5m
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-to-causa-backend
+  namespace: ${APP_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: causa-backend
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-monitoring
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-user-workload-monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
