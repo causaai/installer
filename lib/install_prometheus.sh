@@ -151,9 +151,12 @@ kubeStateMetrics:
 # allowlist is configured — with no allowlist the metric has zero series,
 # so any PromQL rule joining on kube_pod_labels (e.g. the causa.ai/monitoring
 # opt-in filter) silently matches nothing, no matter what labels pods carry.
+# app and app.kubernetes.io/name are also allowlisted so that per-app
+# PrometheusRule templates (templates/causa-memory-alert-template.yaml) can
+# filter by label_app / label_app_kubernetes_io_name on Kind clusters.
 kube-state-metrics:
   metricLabelsAllowlist:
-    - "pods=[causa.ai/monitoring]"
+    - "pods=[causa.ai/monitoring,app,app.kubernetes.io/name]"
 nodeExporter:
   enabled: false
 prometheusOperator:

@@ -1,0 +1,112 @@
+# =============================================================================
+# causa-memory-alert-template.yaml  (Per-App Memory Alert Template)
+#
+# DO NOT apply this file directly with kubectl/oc apply.
+# Use the companion script which handles rendering, Alertmanager merging,
+# and topology detection safely:
+#
+#   ./templates/apply-causa-memory-alert.sh \
+#     --app-name liberty-perf \
+#     --namespace causa-rca \
+#     --threshold 0.80 \
+#     --target kind   # or openshift
+#
+# Onboarding Requirements for App Pods:
+#   1. Must have label: app=${APP_NAME}  (or app.kubernetes.io/name=${APP_NAME})
+#   2. Must have label: causa.ai/monitoring="true"
+# =============================================================================
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${APP_NAME}-causa-memory-alerts
+  namespace: ${APP_NAMESPACE}
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+    app: ${APP_NAME}
+spec:
+  groups:
+  - name: ${APP_NAME}-causa-memory-alerts
+    interval: 30s
+    rules:
+    - alert: CausaApp${APP_NAME}HighMemoryUsage
+      expr: |
+        (
+          sum by (namespace, pod, container) (
+            container_memory_working_set_bytes{namespace="${APP_NAMESPACE}", container!="", container!="POD"}
+          )
+          /
+          sum by (namespace, pod, container) (
+            kube_pod_container_resource_limits{namespace="${APP_NAMESPACE}", resource="memory", container!="", container!="POD"}
+          )
+        ) > ${MEMORY_THRESHOLD}
+        and on(namespace, pod) (
+          kube_pod_labels{
+            namespace="${APP_NAMESPACE}",
+            label_causa_ai_monitoring="true",
+            label_app="${APP_NAME}"
+          }
+          or
+          kube_pod_labels{
+            namespace="${APP_NAMESPACE}",
+            label_causa_ai_monitoring="true",
+            label_app_kubernetes_io_name="${APP_NAME}"
+          }
+        )
+      labels:
+        severity: critical
+        app: ${APP_NAME}
+      annotations:
+        summary: "Container {{ $labels.container }} in pod {{ $labels.pod }} (${APP_NAME}) is using {{ $value | humanizePercentage }} memory"
+        description: |
+          App: ${APP_NAME}
+          Container {{ $labels.container }} in pod {{ $labels.pod }} (namespace {{ $labels.namespace }})
+          is currently using more memory than threshold ${MEMORY_THRESHOLD}.
+        diagnostic_hint: "high_memory_usage"
+        container_name: "{{ $labels.container }}"
+        pod_name: "{{ $labels.pod }}"
+        namespace: "{{ $labels.namespace }}"
+        workload_name: "{{ $labels.container }}"
+        app_name: "${APP_NAME}"
+        memory_threshold: "${MEMORY_THRESHOLD}"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-to-causa-backend
+  namespace: ${APP_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: causa-backend
+  policyTypes:
+  - Ingress
+  ingress:
+    # Kind: kube-prometheus-stack Alertmanager
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+    # OpenShift: platform Alertmanager and UWM Alertmanager
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-monitoring
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-user-workload-monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+    # causa-mcp in the same namespace — calls the backend REST API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: causa-mcp
+    ports:
+    - protocol: TCP
+      port: 8080
