@@ -60,7 +60,7 @@ cd installer
 
 ## Target Quarkus app (Quarkus MCP metrics)
 
-The Causa Backend needs to know the URL of the Quarkus application being profiled.
+The Causa engine needs to know the URL of the Quarkus application being profiled.
 Set this before running the installer if you have a known target app:
 
 ```bash
@@ -94,17 +94,17 @@ lib/
   install_jafra_mcp.sh        # Jafra MCP Server — kind only
   install_quarkus_mcp.sh      # Quarkus MCP Server
   install_postgres.sh         # PostgreSQL — standalone Deployment (kind) / CloudNativePG (openshift)
-  install_causa.sh            # Causa Backend
+  install_causa.sh            # Causa
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
   k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
-  causa/                      # Causa Backend (NodePort 30001, kind)
+  causa/                      # Causa (NodePort 30001, kind)
   jafra/                      # Jafra Ecosystem (kind only)
   jafra_mcp/                  # Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
   causa_mcp/                  # Causa MCP Server (NodePort 30005)
   postgres/                   # PostgreSQL — kind Deployment + OpenShift CNPG manifests
-  openshift/                  # OpenShift-specific manifests (Routes, Causa Backend, monitoring)
+  openshift/                  # OpenShift-specific manifests (Routes, Causa, monitoring)
   prometheus/                 # PrometheusRule (applied on both targets)
 ```
 
