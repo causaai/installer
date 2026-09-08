@@ -123,13 +123,11 @@ if [[ "${CLUSTER_TARGET}" == "openshift" ]]; then
         exit 1
     fi
 
-    # Check if already configured — idempotent
-    if echo "${EXISTING}" | grep -q "causa-webhook"; then
-        echo "causa-webhook receiver already present in ${AM_SECRET} — skipping Alertmanager merge"
-    else
-        echo "Merging causa-webhook receiver into ${AM_SECRET}..."
+    # Reconcile receiver and route independently rather than using a
+    # text-presence check — handles stale URLs and missing routes correctly.
+    echo "Reconciling causa-webhook receiver and route in ${AM_SECRET}..."
 
-        MERGED=$(python3 - "${EXISTING}" "${WEBHOOK_URL}" << 'PYEOF'
+    MERGED=$(python3 - "${EXISTING}" "${WEBHOOK_URL}" << 'PYEOF'
 import sys, yaml
 
 existing_cfg = sys.argv[1]
@@ -137,8 +135,10 @@ webhook_url  = sys.argv[2]
 
 cfg = yaml.safe_load(existing_cfg) or {}
 
-# Append the causa-webhook receiver
-cfg.setdefault("receivers", []).append({
+# --- Reconcile receiver ---
+# Remove any existing causa-webhook receiver (may have stale URL), then re-add.
+receivers = [r for r in cfg.get("receivers", []) if r.get("name") != "causa-webhook"]
+receivers.append({
     "name": "causa-webhook",
     "webhook_configs": [{
         "url": webhook_url,
@@ -146,10 +146,13 @@ cfg.setdefault("receivers", []).append({
         "http_config": {}
     }]
 })
+cfg["receivers"] = receivers
 
-# Insert child route at the front so it matches before any catch-all
+# --- Reconcile route ---
+# Remove any existing causa-webhook child route, then re-insert at front.
 route = cfg.setdefault("route", {})
-route.setdefault("routes", []).insert(0, {
+routes = [r for r in route.get("routes", []) if r.get("receiver") != "causa-webhook"]
+routes.insert(0, {
     "matchers": ['alertname =~ "CausaApp.*"'],
     "receiver": "causa-webhook",
     "group_by": ["namespace", "alertname", "pod"],
@@ -157,18 +160,18 @@ route.setdefault("routes", []).insert(0, {
     "group_interval": "1m",
     "repeat_interval": "15m"
 })
+route["routes"] = routes
 
 print(yaml.dump(cfg, default_flow_style=False, allow_unicode=True))
 PYEOF
 )
 
-        oc create secret generic "${AM_SECRET}" \
-            --from-literal=alertmanager.yaml="${MERGED}" \
-            -n "${AM_NS}" \
-            --dry-run=client -o yaml | oc apply -f -
+    oc create secret generic "${AM_SECRET}" \
+        --from-literal=alertmanager.yaml="${MERGED}" \
+        -n "${AM_NS}" \
+        --dry-run=client -o yaml | oc apply -f -
 
-        echo "Alertmanager ${AM_SECRET} updated with causa-webhook receiver"
-    fi
+    echo "Alertmanager ${AM_SECRET} updated with causa-webhook receiver"
 fi
 
 echo "Done."

@@ -83,6 +83,15 @@ spec:
   policyTypes:
   - Ingress
   ingress:
+    # Kind: kube-prometheus-stack Alertmanager
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+    # OpenShift: platform Alertmanager and UWM Alertmanager
   - from:
     - namespaceSelector:
         matchLabels:
@@ -90,6 +99,14 @@ spec:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: openshift-user-workload-monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+    # causa-mcp in the same namespace — calls the backend REST API
+  - from:
+    - podSelector:
+        matchLabels:
+          app: causa-mcp
     ports:
     - protocol: TCP
       port: 8080
