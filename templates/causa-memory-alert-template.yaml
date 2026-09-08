@@ -1,53 +1,15 @@
 # =============================================================================
 # causa-memory-alert-template.yaml  (Per-App Memory Alert Template)
 #
-# Render with envsubst before applying.  ALL variables are required —
-# rendering with any unset variable produces invalid YAML/PromQL and the
-# PrometheusRule will be rejected by the Prometheus Operator.
+# DO NOT apply this file directly with kubectl/oc apply.
+# Use the companion script which handles rendering, Alertmanager merging,
+# and topology detection safely:
 #
-# IMPORTANT: pass an explicit variable list to envsubst so that Prometheus
-# template variables like $labels and $value are NOT substituted.
-#
-# Validate and render:
-#
-#   # 1. Set all required variables
-#   export APP_NAME=liberty-perf
-#   export APP_NAMESPACE=causa-rca
-#   export MEMORY_THRESHOLD=0.80
-#   export CLUSTER_TARGET=kind        # kind | openshift
-#
-#   # 2. Validate all variables are set and MEMORY_THRESHOLD is a valid decimal
-#   [[ -z "${APP_NAME}"         ]] && { echo "ERROR: APP_NAME is required";         exit 1; }
-#   [[ -z "${APP_NAMESPACE}"    ]] && { echo "ERROR: APP_NAMESPACE is required";    exit 1; }
-#   [[ -z "${MEMORY_THRESHOLD}" ]] && { echo "ERROR: MEMORY_THRESHOLD is required"; exit 1; }
-#   [[ -z "${CLUSTER_TARGET}"   ]] && { echo "ERROR: CLUSTER_TARGET is required (kind or openshift)"; exit 1; }
-#   [[ ! "${MEMORY_THRESHOLD}" =~ ^0(\.[0-9]+)?$|^1(\.0+)?$ ]] && \
-#     { echo "ERROR: MEMORY_THRESHOLD must be a decimal between 0.0 and 1.0 (e.g. 0.80)"; exit 1; }
-#
-#   # 3. Render and apply
-#   #    On Kind the Secret is skipped (openshift-monitoring does not exist).
-#   #    On OpenShift all three documents are applied.
-#   RENDERED=$(envsubst '${APP_NAME},${APP_NAMESPACE},${MEMORY_THRESHOLD}' \
-#     < templates/causa-memory-alert-template.yaml)
-#   if [[ "${CLUSTER_TARGET}" == "kind" ]]; then
-#     # Split on --- boundaries and skip any document that contains 'kind: Secret'
-#     echo "${RENDERED}" | python3 -c "
-#   import sys, re
-#   content = sys.stdin.read()
-#   for doc in re.split(r'(?m)^---\s*$', content):
-#       if re.search(r'^kind:\s*Secret', doc, re.MULTILINE): continue
-#       if re.search(r'^apiVersion:', doc, re.MULTILINE):
-#           print(doc.strip()); print('---')
-#   " | kubectl apply -f -
-#   else
-#     echo "${RENDERED}" | oc apply -f -
-#   fi
-#
-# Variables:
-#   APP_NAME           — name of your application (hyphens allowed, e.g. my-app)
-#   APP_NAMESPACE      — namespace where your app AND causa-backend are deployed
-#   MEMORY_THRESHOLD   — decimal fraction (0.0–1.0) at which the alert fires, e.g. 0.80
-#   CLUSTER_TARGET     — target platform: kind or openshift
+#   ./templates/apply-causa-memory-alert.sh \
+#     --app-name liberty-perf \
+#     --namespace causa-rca \
+#     --threshold 0.80 \
+#     --target kind   # or openshift
 #
 # Onboarding Requirements for App Pods:
 #   1. Must have label: app=${APP_NAME}  (or app.kubernetes.io/name=${APP_NAME})
@@ -108,71 +70,6 @@ spec:
         workload_name: "{{ $labels.container }}"
         app_name: "${APP_NAME}"
         memory_threshold: "${MEMORY_THRESHOLD}"
----
-# OpenShift only — platform Alertmanager configuration.
-# On Kind this document is skipped automatically by the render command above
-# (CLUSTER_TARGET=kind).  On OpenShift (CLUSTER_TARGET=openshift) it is applied
-# as-is.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: alertmanager-main
-  namespace: openshift-monitoring
-type: Opaque
-stringData:
-  alertmanager.yaml: |
-    global:
-      http_config:
-        proxy_from_environment: true
-      resolve_timeout: 5m
-
-    inhibit_rules:
-    - equal:
-      - namespace
-      - alertname
-      source_matchers:
-      - severity = "critical"
-      target_matchers:
-      - severity =~ "warning|info"
-    - equal:
-      - namespace
-      - alertname
-      source_matchers:
-      - severity = "warning"
-      target_matchers:
-      - severity = "info"
-
-    receivers:
-    - name: Default
-    - name: Watchdog
-    - name: Critical
-      webhook_configs:
-      - url: 'http://causa-backend.${APP_NAMESPACE}.svc.cluster.local:8080/api/v1/webhooks/alerts'
-        send_resolved: true
-        http_config:
-          follow_redirects: true
-
-    route:
-      group_by:
-      - namespace
-      group_interval: 5m
-      group_wait: 30s
-      receiver: Default
-      repeat_interval: 12h
-      routes:
-      - matchers:
-        - alertname = "Watchdog"
-        receiver: Watchdog
-      - matchers:
-        - alertname =~ "CausaApp.*"
-        receiver: Critical
-        group_wait: 5s
-        group_interval: 5s
-      - matchers:
-        - severity = "critical"
-        receiver: Critical
-        group_wait: 30s
-        group_interval: 5m
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
