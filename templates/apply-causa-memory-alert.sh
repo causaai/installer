@@ -103,15 +103,22 @@ if [[ "${CLUSTER_TARGET}" == "openshift" ]]; then
     OCP_MONITORING_NS="openshift-monitoring"
     OCP_UWM_NS="openshift-user-workload-monitoring"
 
-    # Detect topology: UWM Alertmanager (Topology A) vs platform (Topology B)
-    if oc get statefulset alertmanager-user-workload -n "${OCP_UWM_NS}" &>/dev/null; then
+    # Detect topology: UWM Alertmanager (Topology A) vs platform (Topology B).
+    # Distinguish a confirmed NotFound from permission/API errors — abort on
+    # the latter to avoid silently modifying the wrong Alertmanager.
+    TOPOLOGY_CHECK=$(oc get statefulset alertmanager-user-workload \
+        -n "${OCP_UWM_NS}" 2>&1) && TOPOLOGY_RC=0 || TOPOLOGY_RC=$?
+    if [[ ${TOPOLOGY_RC} -eq 0 ]]; then
         AM_SECRET="alertmanager-user-workload"
         AM_NS="${OCP_UWM_NS}"
         echo "Topology A detected: configuring alertmanager-user-workload"
-    else
+    elif echo "${TOPOLOGY_CHECK}" | grep -qi "not found\|notfound"; then
         AM_SECRET="alertmanager-main"
         AM_NS="${OCP_MONITORING_NS}"
         echo "Topology B detected: configuring alertmanager-main"
+    else
+        echo "ERROR: Failed to detect Alertmanager topology: ${TOPOLOGY_CHECK}" >&2
+        exit 1
     fi
 
     # Read the existing Alertmanager config
