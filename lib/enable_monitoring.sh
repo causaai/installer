@@ -335,8 +335,8 @@ PYEOF
 #     Deploy to openshift-monitoring so the platform Prometheus (prometheus-k8s)
 #     picks it up — the only Prometheus with container_* and kube_* metrics.
 #
-# The PromQL expressions filter on PLACEHOLDER_NAMESPACE (install namespace)
-# to scope alerts to Causa workloads only regardless of topology.
+# The PromQL expressions use kube_pod_labels{label_causa_ai_monitoring="true"} as
+# the opt-in gate.
 ################################################################################
 _ocp_apply_prometheus_rule() {
     local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
@@ -356,8 +356,7 @@ _ocp_apply_prometheus_rule() {
         rule_ns="${OCP_MONITORING_NAMESPACE}"
     fi
 
-    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${rule_ns} (rule), metrics scoped to: ${INSTALL_NAMESPACE}"
-    # arg 2 = PLACEHOLDER_NAMESPACE (install ns — used in PromQL filters)
+    write_to_log_file "INFO" "Applying PrometheusRule to namespace: ${rule_ns}"
     # arg 5 = PLACEHOLDER_RULE_NAMESPACE (topology-dependent — where the rule lives)
     if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}" "" "" "${rule_ns}"; then
         log_error "Failed to apply PrometheusRule"

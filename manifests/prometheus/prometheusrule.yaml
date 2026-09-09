@@ -5,19 +5,14 @@
 #       Kind:      install namespace (picked up by kube-prometheus-stack)
 #       OpenShift: openshift-monitoring (picked up by platform prometheus-k8s,
 #                  the only Prometheus that has container_* and kube_* metrics)
-#   PLACEHOLDER_NAMESPACE — install namespace, used ONLY inside PromQL expressions
-#       to scope metric queries to the Causa workloads namespace.
-#       These two placeholders are intentionally different:
-#         - PLACEHOLDER_RULE_NAMESPACE controls which Prometheus picks up the rule.
-#         - PLACEHOLDER_NAMESPACE filters which pods' metrics are evaluated.
 #
 # Opt-in: only pods carrying the label  causa.ai/monitoring: "true"  are monitored.
 # Add this label to any workload you want Causa RCA to analyse:
-#   kubectl label pod <pod> causa.ai/monitoring=true -n PLACEHOLDER_NAMESPACE
+#   kubectl label pod <pod> causa.ai/monitoring=true
 #   # or set it in your Deployment's pod template metadata.labels
 #
 # When any alert fires, Alertmanager POSTs the full payload to:
-#   http://causa-backend.PLACEHOLDER_NAMESPACE.svc.cluster.local:8080/api/v1/webhooks/alerts
+#   http://causa-backend.<namespace>.svc.cluster.local:8080/api/v1/webhooks/alerts
 # which triggers Causa Backend to start an RCA for the affected workload.
 #
 # The backend cooldown is 15 minutes — repeat_interval in the Alertmanager config
@@ -61,8 +56,7 @@ spec:
               sum by (namespace, pod, container) (
                 container_memory_working_set_bytes{
                   container!="",
-                  container!="POD",
-                  namespace="PLACEHOLDER_NAMESPACE"
+                  container!="POD"
                 }
               )
               /
@@ -70,14 +64,12 @@ spec:
                 kube_pod_container_resource_limits{
                   resource="memory",
                   container!="",
-                  container!="POD",
-                  namespace="PLACEHOLDER_NAMESPACE"
+                  container!="POD"
                 }
               )
             ) > 0.80
             and on(namespace, pod)
             kube_pod_labels{
-              namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
           labels:
@@ -101,12 +93,10 @@ spec:
         - alert: causa-oom-killed
           expr: |
             kube_pod_container_status_last_terminated_reason{
-              reason="OOMKilled",
-              namespace="PLACEHOLDER_NAMESPACE"
+              reason="OOMKilled"
             } == 1
             and on(namespace, pod)
             kube_pod_labels{
-              namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
           labels:
@@ -128,13 +118,10 @@ spec:
         - alert: causa-crash-loop
           expr: |
             increase(
-              kube_pod_container_status_restarts_total{
-                namespace="PLACEHOLDER_NAMESPACE"
-              }[10m]
+              kube_pod_container_status_restarts_total[10m]
             ) > 2
             and on(namespace, pod)
             kube_pod_labels{
-              namespace="PLACEHOLDER_NAMESPACE",
               label_causa_ai_monitoring="true"
             }
           for: 0m
@@ -150,71 +137,3 @@ spec:
             container_name: "{{ $labels.container }}"
             namespace: "{{ $labels.namespace }}"
             diagnostic_hint: "crash_loop_back_off"
-
-        # ── CPU Throttling ─────────────────────────────────────────────────
-        # Fires when a monitored container is throttled above 50% for 2 minutes.
-        - alert: causa-cpu-throttling
-          expr: |
-            (
-              rate(
-                container_cpu_cfs_throttled_periods_total{
-                  namespace="PLACEHOLDER_NAMESPACE",
-                  container!=""
-                }[5m]
-              )
-              /
-              rate(
-                container_cpu_cfs_periods_total{
-                  namespace="PLACEHOLDER_NAMESPACE",
-                  container!=""
-                }[5m]
-              )
-            ) > 0.5
-            and on(namespace, pod)
-            kube_pod_labels{
-              namespace="PLACEHOLDER_NAMESPACE",
-              label_causa_ai_monitoring="true"
-            }
-          for: 2m
-          labels:
-            severity: warning
-          annotations:
-            summary: "CPU throttling {{ $value | humanizePercentage }} on container {{ $labels.container }} in pod {{ $labels.pod }}"
-            description: >-
-              Container {{ $labels.container }} in pod {{ $labels.pod }}
-              (namespace {{ $labels.namespace }}) has more than 50% of its CPU
-              scheduling periods being throttled.
-            workload_name: "{{ $labels.container }}"
-            pod_name: "{{ $labels.pod }}"
-            container_name: "{{ $labels.container }}"
-            namespace: "{{ $labels.namespace }}"
-            diagnostic_hint: "cpu_throttling"
-
-        # ── Frequent Restarts ──────────────────────────────────────────────
-        # Fires when a monitored pod restarts more than 5 times in 30 minutes —
-        # indicates a persistent failure not caught by the crash-loop rule.
-        - alert: causa-frequent-restarts
-          expr: |
-            increase(
-              kube_pod_container_status_restarts_total{
-                namespace="PLACEHOLDER_NAMESPACE"
-              }[30m]
-            ) > 5
-            and on(namespace, pod)
-            kube_pod_labels{
-              namespace="PLACEHOLDER_NAMESPACE",
-              label_causa_ai_monitoring="true"
-            }
-          labels:
-            severity: warning
-          annotations:
-            summary: "Frequent restarts: pod {{ $labels.pod }} restarted {{ $value | humanize }} times in 30m"
-            description: >-
-              Pod {{ $labels.pod }} (namespace {{ $labels.namespace }}) has
-              restarted more than 5 times in 30 minutes. This suggests a
-              persistent failure or configuration issue.
-            workload_name: "{{ $labels.container }}"
-            pod_name: "{{ $labels.pod }}"
-            container_name: "{{ $labels.container }}"
-            namespace: "{{ $labels.namespace }}"
-            diagnostic_hint: "frequent_restarts"
