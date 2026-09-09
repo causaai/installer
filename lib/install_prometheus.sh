@@ -59,10 +59,9 @@ _prometheus_already_installed() {
 ################################################################################
 # _write_alertmanager_values
 # Writes a temporary Helm values file that:
-#   1. Configures a single Alertmanager route → Critical receiver
+#   1. Configures Alertmanager routes → causa-critical receiver
 #   2. Sets the webhook URL to the Causa Backend /api/v1/webhooks/alerts endpoint
-#   3. Disables the default null receiver so all alerts go to Causa
-#   4. Keeps Prometheus resource limits low for a local Kind cluster
+#   3. Keeps Prometheus resource limits low for a local Kind cluster
 # Prints the path to the temp file.
 ################################################################################
 _write_alertmanager_values() {

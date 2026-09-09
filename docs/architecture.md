@@ -111,7 +111,7 @@ On OpenShift, `enable_monitoring.sh` handles Prometheus integration instead of i
 2. Detects the Alertmanager topology:
    - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): applies `manifests/prometheus/alertmanager-secret.yaml` in full to `openshift-user-workload-monitoring`; deploys `PrometheusRule` to `openshift-user-workload-monitoring`
    - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `causa-critical` receiver into the existing config using `python3` + PyYAML; deploys `PrometheusRule` to `openshift-monitoring`
-3. Applies a `PrometheusRule` (`causa-rca-alerts`) with 3 alert rules — deployed to the topology-appropriate namespace so the correct Prometheus picks it up. Alerts are cluster-scoped; opt-in is via the `causa.ai/monitoring: "true"` pod label.
+3. Applies a `PrometheusRule` (`causa-rca-alerts`) with 3 alert rules — deployed to the topology-appropriate namespace so the correct Prometheus picks it up. Alerts are opt-in is via the `causa.ai/monitoring: "true"` pod label.
 4. Applies a `NetworkPolicy` allowing Alertmanager namespaces, OpenShift ingress router, and `causa-mcp` to reach Causa on port 8080
 
 ## Causa — MCP endpoint configuration
