@@ -15,9 +15,9 @@ For a quick start, see the [README](../README.md).
 | `helm` | Prometheus Stack install | [helm.sh](https://helm.sh/docs/intro/install/) |
 | `curl`, `grep`, `sed`, `awk` | Script utilities | Pre-installed on macOS and most Linux distributions |
 
-> **Podman users:** Kind requires rootful mode. Initialise the machine with:
+> **Podman users:** Both rootful and rootless modes are supported. On macOS, ensure the machine is allocated sufficient resources:
 > ```bash
-> podman machine init --rootful --cpus 4 --memory 4096
+> podman machine init --cpus 4 --memory 4096
 > podman machine start
 > ```
 
