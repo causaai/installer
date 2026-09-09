@@ -159,16 +159,6 @@ sudo systemctl start docker
 podman machine start
 ```
 
-### Podman rootless mode (Kind only)
-
-Kind requires rootful Podman. Recreate the machine with rootful mode:
-
-```bash
-podman machine stop
-podman machine rm
-podman machine init --rootful --cpus 4 --memory 4096
-podman machine start
-```
 
 ### Cluster not reachable
 

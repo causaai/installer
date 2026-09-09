@@ -146,7 +146,58 @@ _check_ports_available() {
 # _write_kind_config — writes cluster config YAML to a temp file and prints the path
 _write_kind_config() {
     local config_file; config_file=$(mktemp /tmp/kind-config-XXXXXX.yaml)
-    cat > "${config_file}" << EOF
+    local runtime="${CONTAINER_RUNTIME:-docker}"
+
+    # In rootless setups (e.g. rootless Podman / Docker on cgroups v2), forcing
+    # cgroupfs causes kubelet startup failure because systemd cgroup delegation is required.
+    # We dynamically detect whether the runtime is running in rootless mode.
+    local is_rootless=false
+    if [[ "${runtime}" == "podman" ]]; then
+        local rootful_inspect
+        rootful_inspect=$(podman machine inspect --format '{{.Rootful}}' 2>/dev/null || echo "")
+        if [[ "${rootful_inspect}" == "false" ]]; then
+            is_rootless=true
+        else
+            local native_rootless
+            native_rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo "")
+            if [[ "${native_rootless}" == "true" ]]; then
+                is_rootless=true
+            fi
+        fi
+    elif [[ "${runtime}" == "docker" ]]; then
+        if docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -qi "rootless"; then
+            is_rootless=true
+        fi
+    fi
+
+    if [[ "${is_rootless}" == "true" ]]; then
+        # In rootless mode, omit cgroupfs overrides to allow Kind/containerd/kubelet
+        # to use default systemd cgroup driver with rootless delegation.
+        cat > "${config_file}" << EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ${KIND_CLUSTER_NAME}
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.14
+    # causa-backend (8080) and causa-mcp (8081) are ClusterIP services reached
+    # from the host via kubectl port-forward, so they get no
+    # host mapping here.  Only the k8s-mcp (30000) and quarkus-mcp (30004)
+    # NodePorts are published to the host.
+    extraPortMappings:
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+      - containerPort: 30004
+        hostPort: 30004
+        protocol: TCP
+EOF
+    else
+        cat > "${config_file}" << EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: ${KIND_CLUSTER_NAME}
@@ -178,6 +229,8 @@ nodes:
         hostPort: 30004
         protocol: TCP
 EOF
+    fi
+
     echo "${config_file}"
 }
 
@@ -290,14 +343,33 @@ _tune_kind_node_sysctls() {
             return 0
         fi
 
+        # If running podman on macOS, sysctl from inside container is rejected in rootless mode;
+        # attempt to auto-apply sysctls via podman machine ssh if needed.
+        if [[ "$_runtime" == "podman" ]]; then
+            # Attempt auto-tuning directly via podman machine ssh (works for both rootful and rootless VM)
+            if [[ "$_cur_instances" -lt "$_min_instances" || "$_cur_watches" -lt "$_min_watches" ]]; then
+                podman machine ssh "echo -e 'fs.inotify.max_user_instances = $_min_instances\nfs.inotify.max_user_watches = $_min_watches' | sudo tee /etc/sysctl.d/99-inotify.conf && sudo sysctl --system" >>"${LOG_FILE:-/dev/null}" 2>&1 || true
+
+                # Re-read after tuning attempt
+                _cur_instances=$("$_runtime" exec "$_node_container" cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo "$_cur_instances")
+                _cur_watches=$("$_runtime" exec "$_node_container" cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo "$_cur_watches")
+            fi
+        fi
+
         _remediation_header="inotify limits inside the kind node VM are too low for the jafra-agent."
-        _remediation_cmds=\
+        if [[ "$_runtime" == "podman" ]]; then
+            _remediation_cmds=\
+"  podman machine ssh \"echo -e 'fs.inotify.max_user_instances = $_min_instances\\nfs.inotify.max_user_watches = $_min_watches' | sudo tee /etc/sysctl.d/99-inotify.conf && sudo sysctl --system\""
+            _remediation_persist=""
+        else
+            _remediation_cmds=\
 "  $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_instances=$_min_instances
   $_runtime exec --privileged $_node_container sysctl -w fs.inotify.max_user_watches=$_min_watches"
-        _remediation_persist=\
+            _remediation_persist=\
 "Or configure your VM runtime (Docker Desktop / OrbStack / colima) to set:
   fs.inotify.max_user_instances = $_min_instances
   fs.inotify.max_user_watches   = $_min_watches"
+        fi
     else
         # Linux: read directly from /proc/sys on the host.
         _cur_instances=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
@@ -399,6 +471,21 @@ install_kind_cluster() {
         if ! KIND_EXPERIMENTAL_PROVIDER="${CONTAINER_RUNTIME}" \
                 kind create cluster --config "${kind_config}" >>"${LOG_FILE}" 2>&1; then
             log_error "Failed to create Kind cluster '${KIND_CLUSTER_NAME}'"
+            local _os
+            _os=$(uname -s 2>/dev/null || echo "Linux")
+
+            if [[ "${_os}" == "Linux" ]]; then
+                log_error "For rootless environments on Linux, ensure cgroup v2 delegation and iptables modules are enabled:"
+                log_error "  # Enable user cgroup delegation:"
+                log_error "  sudo mkdir -p /etc/systemd/system/user@.service.d"
+                log_error "  echo -e '[Service]\\nDelegate=yes' | sudo tee /etc/systemd/system/user@.service.d/delegate.conf"
+                log_error "  sudo systemctl daemon-reload"
+                log_error "  # Load kernel modules for rootless kind networking:"
+                log_error "  sudo modprobe ip_tables iptable_nat iptable_filter ip6_tables 2>/dev/null || true"
+            elif [[ "${_os}" == "Darwin" && "${CONTAINER_RUNTIME:-docker}" == "podman" ]]; then
+                log_error "Ensure your Podman machine has sufficient CPU/memory resources allocated:"
+                log_error "  podman machine set --cpus 4 --memory 4096"
+            fi
             rm -f "${kind_config}"
             return 1
         fi

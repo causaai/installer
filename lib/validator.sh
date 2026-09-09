@@ -140,13 +140,16 @@ validate_docker_running() {
         local rootful
         rootful=$(podman machine inspect --format '{{.Rootful}}' 2>/dev/null || echo "")
         if [[ "${rootful}" == "false" ]]; then
-            log_error "Podman machine is running in rootless mode — Kind requires rootful mode."
-            log_error "Recreate the Podman machine as rootful:"
-            log_error "  podman machine stop"
-            log_error "  podman machine rm"
-            log_error "  podman machine init --rootful --cpus 4 --memory 4096"
-            log_error "  podman machine start"
-            return 1
+            write_to_log_file "INFO" "Podman machine is running in rootless mode."
+        elif [[ "${rootful}" == "true" ]]; then
+            write_to_log_file "INFO" "Podman machine is running in rootful mode."
+        else
+            # Native Linux Podman check
+            local is_rootless
+            is_rootless=$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo "")
+            if [[ "${is_rootless}" == "true" ]]; then
+                write_to_log_file "INFO" "Podman host is running in rootless mode."
+            fi
         fi
     fi
 
