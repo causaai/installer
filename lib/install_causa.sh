@@ -12,7 +12,7 @@
 #   CAUSA_MCP_QUARKUS_METRICS_BASE_URL — target Quarkus app under analysis
 #   CAUSA_MCP_ASYNC_PROFILER_ENDPOINT  — Jafra MCP server (async-profiler)
 #
-# OpenShift target: applies manifests/openshift/causa-backend/ files
+# OpenShift target: applies manifests/openshift/causa/ files
 #   (serviceaccount, configmap, deployment, service, route).
 # kind target: applies manifests/causa/deployment.yaml (NodePort Service).
 ################################################################################
@@ -109,7 +109,7 @@ install_causa() {
     quarkus_metrics_base_url_escaped="${quarkus_metrics_base_url_escaped//|/\\|}"
 
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa-backend"
+        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa"
 
         apply_manifest "${ocp_dir}/serviceaccount.yaml" "${INSTALL_NAMESPACE}" || return 1
 
@@ -213,7 +213,7 @@ uninstall_causa() {
     fi
 
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa-backend"
+        local ocp_dir="${SCRIPT_DIR}/manifests/openshift/causa"
         delete_manifest "${ocp_dir}/route.yaml"          "${INSTALL_NAMESPACE}"
         delete_manifest "${ocp_dir}/deployment.yaml"     "${INSTALL_NAMESPACE}"
         delete_manifest "${ocp_dir}/service.yaml"        "${INSTALL_NAMESPACE}"

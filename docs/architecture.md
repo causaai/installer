@@ -95,13 +95,13 @@ The validator detects the available container runtime automatically:
 | Secret | Keys |
 |---|---|
 | `postgres-credentials` | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` (used by the Pod) |
-| `causa-db-secrets` | `CAUSA_DB_USERNAME`, `CAUSA_DB_PASSWORD`, `CAUSA_DB_URL` (read by Causa Backend) |
+| `causa-db-secrets` | `CAUSA_DB_USERNAME`, `CAUSA_DB_PASSWORD`, `CAUSA_DB_URL` (read by Causa) |
 
 The pgvector extension is initialised at startup via a ConfigMap-mounted SQL script.
 
 ### OpenShift — CloudNativePG operator
 
-`install_postgres.sh` installs the CloudNativePG operator via OLM (Subscription + InstallPlan approval), then applies the `iri-db` Cluster CRD. Once the cluster is healthy, credentials are read from the CNPG-generated `iri-db-app` Secret and re-exposed as the `causa-db-secrets` Secret that Causa Backend reads.
+`install_postgres.sh` installs the CloudNativePG operator via OLM (Subscription + InstallPlan approval), then applies the `iri-db` Cluster CRD. Once the cluster is healthy, credentials are read from the CNPG-generated `iri-db-app` Secret and re-exposed as the `causa-db-secrets` Secret that Causa reads.
 
 ## OpenShift monitoring
 
@@ -112,11 +112,11 @@ On OpenShift, `enable_monitoring.sh` handles Prometheus integration instead of i
    - **Topology A** — UWM Alertmanager present (`alertmanager-user-workload`): configures it directly via its own Secret
    - **Topology B** — platform Alertmanager only (`alertmanager-main`): merges the `causa-webhook` receiver into the existing config using `python3` + PyYAML
 3. Applies a `PrometheusRule` with Causa alert definitions
-4. Applies a `NetworkPolicy` allowing Alertmanager and the OpenShift ingress router to reach Causa Backend on port 8080
+4. Applies a `NetworkPolicy` allowing Alertmanager and the OpenShift ingress router to reach Causa on port 8080
 
-## Causa Backend — MCP endpoint configuration
+## Causa — MCP endpoint configuration
 
-After the Causa Backend deployment becomes ready, `install_causa.sh` stamps three env vars
+After the Causa deployment becomes ready, `install_causa.sh` stamps three env vars
 onto the running deployment using `kubectl set env` (idempotent — safe on every re-run):
 
 | Env var | Value | Source |
@@ -142,7 +142,7 @@ Each manifest contains placeholder tokens that are substituted at apply time usi
 
 The standard `apply_manifest` helper in `lib/install_utils.sh` handles `PLACEHOLDER_NAMESPACE`
 and `PLACEHOLDER_CLUSTER_TYPE`. The `PLACEHOLDER_QUARKUS_METRICS_BASE_URL` substitution is
-applied automatically for the Causa Backend manifests during installation.
+applied automatically for the Causa manifests during installation.
 
 ## Optional components
 

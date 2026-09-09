@@ -37,7 +37,7 @@ For installation steps, see the [Installation Guide](installation.md).
 | `KIND_REGISTRY_PORT` | `5001` | Local registry host port |
 | `PROMETHEUS_NAMESPACE` | `monitoring` | Namespace where kube-prometheus-stack is installed |
 
-### Causa Backend endpoint configuration
+### Causa endpoint configuration
 
 | Variable | Default | Description |
 |---|---|---|
@@ -65,7 +65,7 @@ Priority order (highest to lowest):
 | Flag | Component | Target |
 |---|---|---|
 | `--k8s-mcp-server-image IMAGE` | Kubernetes MCP Server | both |
-| `--causa-backend-image IMAGE` | Causa Backend | both |
+| `--causa-backend-image IMAGE` | Causa | both |
 | `--quarkus-mcp-image IMAGE` | Quarkus MCP Server | both |
 | `--causa-mcp-image IMAGE` | Causa MCP Server | both |
 | `--postgres-kind-image IMAGE` | PostgreSQL (Kind — pgvector-enabled image) | kind only |
@@ -80,7 +80,7 @@ Priority order (highest to lowest):
 | Variable | Component | Target |
 |---|---|---|
 | `K8S_MCP_SERVER_IMAGE` | Kubernetes MCP Server | both |
-| `CAUSA_BACKEND_IMAGE` | Causa Backend | both |
+| `CAUSA_BACKEND_IMAGE` | Causa | both |
 | `QUARKUS_MCP_IMAGE` | Quarkus MCP Server | both |
 | `CAUSA_MCP_IMAGE` | Causa MCP Server | both |
 | `POSTGRES_KIND_IMAGE` | PostgreSQL (Kind) | kind only |
@@ -93,7 +93,7 @@ Priority order (highest to lowest):
 ### Examples
 
 ```bash
-# Override Causa Backend image (works on both targets)
+# Override Causa image (works on both targets)
 ./install.sh --causa-backend-image quay.io/myorg/causa-backend:v1.2.3
 
 # Override PostgreSQL image on OpenShift
