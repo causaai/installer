@@ -260,7 +260,8 @@ causa_cfg = yaml.safe_load(secret_doc["stringData"]["alertmanager.yaml"])
 
 # Add causa-critical receiver from the manifest file.
 # Guard against duplicate names: if a receiver named causa-critical already
-# exists (with a different URL), skip
+# exists (with a different URL), skip.
+existing_receiver_names = {r.get("name") for r in cfg.get("receivers", [])}
 causa_receiver = next(
     (r for r in causa_cfg.get("receivers", []) if r.get("name") == "causa-critical"),
     None

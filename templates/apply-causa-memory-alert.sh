@@ -163,20 +163,22 @@ with open(in_path) as f:
     cfg = yaml.safe_load(f.read()) or {}
 
 # --- Reconcile receiver ---
-# Guard: skip if a receiver named causa-critical already exists (different URL
-# would have been caught by the idempotency check above, so this is a no-op
-# safety guard against duplicate appends on concurrent runs).
+# If a receiver named causa-critical already exists but points to a different
+# URL, we cannot safely overwrite it (it belongs to another system).
 existing_names = {r.get("name") for r in cfg.get("receivers", [])}
-if "causa-critical" not in existing_names:
-    cfg.setdefault("receivers", [])
-    cfg["receivers"].append({
-        "name": "causa-critical",
-        "webhook_configs": [{
-            "url": webhook,
-            "send_resolved": False,
-            "http_config": {"follow_redirects": True}
-        }]
-    })
+if "causa-critical" in existing_names:
+    import sys
+    sys.exit("ERROR: A receiver named 'causa-critical' already exists in " + in_path +
+             " with a different URL. Rename it before running this script.")
+cfg.setdefault("receivers", [])
+cfg["receivers"].append({
+    "name": "causa-critical",
+    "webhook_configs": [{
+        "url": webhook,
+        "send_resolved": False,
+        "http_config": {"follow_redirects": True}
+    }]
+})
 
 # --- Reconcile route ---
 # Insert at front so it takes precedence over the platform catch-all.

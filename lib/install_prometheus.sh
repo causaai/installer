@@ -113,12 +113,14 @@ alertmanager:
           receiver: causa-critical
           group_wait: 5s
           group_interval: 5s
+          repeat_interval: 15m
         # Any other critical severity alert also goes to the webhook receiver.
         - matchers:
             - severity = "critical"
           receiver: causa-critical
           group_wait: 30s
           group_interval: 5m
+          repeat_interval: 15m
     receivers:
       - name: Default
       - name: Watchdog
