@@ -20,13 +20,12 @@ Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster
 
 ### Kind
 
-- [`docker`](https://docs.docker.com/get-docker/) **or** [`podman`](https://podman.io/getting-started/installation) (rootful mode)
+- [`docker`](https://docs.docker.com/get-docker/) **or** [`podman`](https://podman.io/getting-started/installation)
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
 - [`helm`](https://helm.sh/docs/intro/install/) — required for the Prometheus Stack
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
-> **Podman users:** the Podman machine must be started in rootful mode (`podman machine init --rootful`).
 
 ### OpenShift
 

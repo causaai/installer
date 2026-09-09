@@ -84,8 +84,6 @@ The validator detects the available container runtime automatically:
 2. Falls back to **Docker**, with a check to detect if `docker` is actually a Podman shim
 3. Exports `CONTAINER_RUNTIME` (`docker` or `podman`) for use by the Kind cluster script
 
-> Podman must run in **rootful mode** — rootless Podman is incompatible with Kind.
-
 ## PostgreSQL setup
 
 ### Kind — standalone Deployment
