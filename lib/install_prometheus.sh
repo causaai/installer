@@ -59,10 +59,9 @@ _prometheus_already_installed() {
 ################################################################################
 # _write_alertmanager_values
 # Writes a temporary Helm values file that:
-#   1. Configures a single Alertmanager route → causa-webhook receiver
+#   1. Configures Alertmanager routes → causa-critical receiver
 #   2. Sets the webhook URL to the Causa Backend /api/v1/webhooks/alerts endpoint
-#   3. Disables the default null receiver so all alerts go to Causa
-#   4. Keeps Prometheus resource limits low for a local Kind cluster
+#   3. Keeps Prometheus resource limits low for a local Kind cluster
 # Prints the path to the temp file.
 ################################################################################
 _write_alertmanager_values() {
@@ -79,38 +78,58 @@ _write_alertmanager_values() {
 alertmanager:
   config:
     global:
+      http_config:
+        proxy_from_environment: true
       resolve_timeout: 5m
+    inhibit_rules:
+      - equal:
+          - namespace
+          - alertname
+        source_matchers:
+          - severity = "critical"
+        target_matchers:
+          - severity =~ "warning|info"
+      - equal:
+          - namespace
+          - alertname
+        source_matchers:
+          - severity = "warning"
+        target_matchers:
+          - severity = "info"
     route:
-      # Default: everything not explicitly matched below goes nowhere —
-      # only Causa's own PrometheusRule alerts (see child route) reach the webhook.
-      receiver: "null"
-      group_by: ['namespace', 'alertname', 'pod']
+      receiver: Default
+      group_by: ['namespace']
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 12h
       routes:
-        # Only alerts fired by Causa's PrometheusRule (CausaApp*) go to the webhook.
+        # Watchdog — keep-alive alert; routed to a no-op receiver.
         - matchers:
-            - alertname =~ "CausaApp.*"
-          receiver: causa-webhook
-          # Group by pod so each affected pod fires its alert independently
-          # rather than batching all pods in the namespace into one notification.
-          group_by: ['namespace', 'alertname', 'pod']
-          group_wait: 10s
-          group_interval: 1m
-          # 15m matches the Causa Backend cooldown period — ensures the same alert
-          # is not re-sent before a previous RCA has had time to complete.
+            - alertname = "Watchdog"
+          receiver: Watchdog
+        # Causa RCA alerts — all causa-* alerts go to the webhook receiver.
+        - matchers:
+            - alertname =~ "causa-.*"
+          receiver: causa-critical
+          group_wait: 5s
+          group_interval: 5s
+          repeat_interval: 15m
+        # Any other critical severity alert also goes to the webhook receiver.
+        - matchers:
+            - severity = "critical"
+          receiver: causa-critical
+          group_wait: 30s
+          group_interval: 5m
           repeat_interval: 15m
     receivers:
-      - name: causa-webhook
+      - name: Default
+      - name: Watchdog
+      - name: causa-critical
         webhook_configs:
           - url: "${webhook_url}"
-            send_resolved: true
-            # Pass the full alert payload so Causa can extract
-            # workload_name, namespace, and alert details
-            http_config: {}
-      # Keep null receiver so Alertmanager doesn't complain
-      - name: "null"
+            send_resolved: false
+            http_config:
+              follow_redirects: true
   alertmanagerSpec:
     resources:
       requests:
@@ -272,19 +291,9 @@ install_prometheus() {
     # ── 7. Apply PrometheusRule and NetworkPolicy ─────────────────────────────
     local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
     for manifest in "${prom_dir}/prometheusrule.yaml" "${prom_dir}/networkpolicy.yaml"; do
-        if [[ -f "${manifest}" ]]; then
-            write_to_log_file "INFO" "Applying manifest: ${manifest}"
-            local tmp; tmp=$(mktemp /tmp/causa-prom-manifest-XXXXXX.yaml)
-            sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
-            if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
-                rm -f "${tmp}"
-                log_error "Failed to apply ${manifest}"
-                return 1
-            fi
-            rm -f "${tmp}"
-            write_to_log_file "SUCCESS" "Applied: $(basename "${manifest}") to namespace: ${INSTALL_NAMESPACE}"
-        else
-            write_to_log_file "WARN" "Manifest not found: ${manifest} — skipping"
+        if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}"; then
+            log_error "Failed to apply ${manifest}"
+            return 1
         fi
     done
 

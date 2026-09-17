@@ -1,13 +1,17 @@
 # NetworkPolicy — allow ingress to the Causa Backend pod on port 8080 from:
-#   1. Alertmanager (kube-prometheus-stack) in the monitoring namespace
-#   2. causa-mcp in the same namespace — it calls the backend REST API at startup
-#      and on every tool invocation; without this rule its traffic is silently
-#      dropped on clusters with a default-deny ingress NetworkPolicy.
+#   1. Alertmanager namespace(s):
+#        Kind   → monitoring  (kube-prometheus-stack)
+#        OpenShift → openshift-monitoring + openshift-user-workload-monitoring
+#      All three selectors are present in this single file; on Kind the
+#      openshift-* selectors match no namespace and are silently ignored.
+#   2. causa-mcp in the same namespace — it calls the backend REST API at
+#      startup and on every tool invocation.
+#   3. openshift-ingress — the HAProxy router namespace on OpenShift.
+#      Without this rule the router cannot reach the pod and returns HTTP 503
+#      to external callers.  On Kind this selector matches nothing and is
+#      silently ignored.
 #
 # Namespace placeholder: PLACEHOLDER_NAMESPACE  (replaced by installer at apply time)
-#
-# On OpenShift with User Workload Monitoring, also allow from
-# openshift-user-workload-monitoring — add that namespaceSelector if needed.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,6 +24,7 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # ── Kind: kube-prometheus-stack Alertmanager ────────────────────────────
     - from:
         - namespaceSelector:
             matchLabels:
@@ -27,6 +32,31 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # ── OpenShift: platform Alertmanager (openshift-monitoring) ────────────
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+    # ── OpenShift: User Workload Monitoring Alertmanager ────────────────────
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-user-workload-monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+    # ── OpenShift: HAProxy ingress router ───────────────────────────────────
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-ingress
+      ports:
+        - protocol: TCP
+          port: 8080
+    # ── Both: causa-mcp pod in the same namespace ───────────────────────────
     - from:
         - podSelector:
             matchLabels:
