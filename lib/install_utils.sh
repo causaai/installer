@@ -252,17 +252,23 @@ calculate_elapsed_label() {
 ################################################################################
 # Apply a YAML manifest with optional namespace and image substitution.
 #
-# Usage: apply_manifest <manifest_file> [namespace] [image_var_name] [image_value]
+# Usage: apply_manifest <manifest_file> [namespace] [image_var_name] [image_value] [rule_namespace]
 #
 # The function creates a temporary copy, performs sed replacements for the
-# namespace placeholder (PLACEHOLDER_NAMESPACE) and an optional image line,
-# applies it, then cleans up.
+# namespace placeholders and an optional image line, applies it, then cleans up.
+#
+# PLACEHOLDER_NAMESPACE      — install namespace (pods, services, etc.)
+# PLACEHOLDER_RULE_NAMESPACE — namespace where the PrometheusRule is deployed.
+#   Defaults to [namespace] when not provided, so all existing callers are
+#   unaffected. Only the OpenShift PrometheusRule apply path passes a different
+#   value (openshift-monitoring) so the platform Prometheus picks up the rule.
 ################################################################################
 apply_manifest() {
     local manifest="$1"
     local ns="${2:-${INSTALL_NAMESPACE}}"
     local img_pattern="${3:-}"   # sed pattern to match image line
     local img_value="${4:-}"     # new image value
+    local rule_ns="${5:-${ns}}"  # namespace for PrometheusRule; defaults to ns
 
     if [[ ! -f "${manifest}" ]]; then
         write_to_log_file "ERROR" "Manifest not found: ${manifest}"
@@ -273,6 +279,7 @@ apply_manifest() {
 
     # Namespace and cluster-type substitution
     sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
+        -e "s/PLACEHOLDER_RULE_NAMESPACE/${rule_ns}/g" \
         -e "s/PLACEHOLDER_CLUSTER_TYPE/${INSTALL_TARGET:-kind}/g" \
         "${manifest}" > "${tmp}"
 
