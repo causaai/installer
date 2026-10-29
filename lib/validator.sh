@@ -27,7 +27,7 @@ validate_prerequisites() {
         # Not required: kind, docker/podman (no local cluster management)
         # oc is preferred; kubectl is accepted as a fallback. Requiring kubectl
         # unconditionally would reject valid OCP environments that have oc only.
-        local required_tools=("helm" "curl" "grep" "sed" "awk")
+        local required_tools=("helm" "jq" "curl" "grep" "sed" "awk")
 
         if check_command_exists "oc"; then
             write_to_log_file "SUCCESS" "oc (OpenShift CLI) found: $(oc version --client --short 2>/dev/null || echo 'unknown')"
@@ -56,6 +56,7 @@ validate_prerequisites() {
             log_error "  - oc:      https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html"
             log_error "  - kubectl: https://kubernetes.io/docs/tasks/tools/"
             log_error "  - helm:    https://helm.sh/docs/intro/install/"
+            log_error "  - jq:      https://jqlang.github.io/jq/download/"
             return 1
         fi
     else
@@ -80,7 +81,7 @@ validate_prerequisites() {
         # its binary exists — if neither daemon responded to the timed probe the
         # runtime is considered unavailable and the check below returns 1.
 
-        local required_tools=("kubectl" "kind" "helm" "curl" "grep" "sed" "awk")
+        local required_tools=("kubectl" "kind" "helm" "jq" "curl" "grep" "sed" "awk")
         [[ -z "${container_runtime}" ]] && required_tools+=("docker")  # will fail with a clear message
 
         for tool in "${required_tools[@]}"; do
@@ -98,6 +99,7 @@ validate_prerequisites() {
             log_error "  - kind:    https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
             log_error "  - kubectl: https://kubernetes.io/docs/tasks/tools/"
             log_error "  - helm:    https://helm.sh/docs/intro/install/"
+            log_error "  - jq:      https://jqlang.github.io/jq/download/"
             return 1
         fi
 
