@@ -113,16 +113,17 @@ oc get pods -n openshift-user-workload-monitoring
 oc get statefulset alertmanager-user-workload -n openshift-user-workload-monitoring 2>/dev/null \
   && echo "Topology A: UWM Alertmanager" || echo "Topology B: platform Alertmanager only"
 
-# Verify causa-webhook is configured (Topology A)
+# Verify causa-critical receiver is configured (Topology A)
 oc get secret alertmanager-user-workload -n openshift-user-workload-monitoring \
-  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep causa-webhook
+  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep "name: causa-critical"
 
-# Verify causa-webhook is configured (Topology B)
+# Verify causa-critical receiver is configured (Topology B)
 oc get secret alertmanager-main -n openshift-monitoring \
-  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep causa-webhook
+  -o jsonpath='{.data.alertmanager\.yaml}' | base64 -d | grep "name: causa-critical"
 
-# Check PrometheusRule
-oc get prometheusrule -n causa-rca
+# Check PrometheusRule — Topology A: openshift-user-workload-monitoring, Topology B: openshift-monitoring
+oc get prometheusrule causa-rca-alerts -n openshift-monitoring 2>/dev/null \
+  || oc get prometheusrule causa-rca-alerts -n openshift-user-workload-monitoring
 ```
 
 ## Common errors

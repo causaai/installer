@@ -20,9 +20,9 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: ${APP_NAME}-causa-memory-alerts
-  namespace: ${APP_NAMESPACE}
+  namespace: ${RULE_NAMESPACE}
   labels:
-    prometheus: kube-prometheus
+    prometheus: k8s
     role: alert-rules
     app: ${APP_NAME}
 spec:
@@ -30,7 +30,7 @@ spec:
   - name: ${APP_NAME}-causa-memory-alerts
     interval: 30s
     rules:
-    - alert: CausaApp${APP_NAME}HighMemoryUsage
+    - alert: causa-high-memory-${APP_NAME}
       expr: |
         (
           sum by (namespace, pod, container) (
@@ -74,7 +74,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-alertmanager-to-causa-backend
+  name: allow-alertmanager-to-causa-backend-${APP_NAME}
   namespace: ${APP_NAMESPACE}
 spec:
   podSelector:
@@ -91,18 +91,31 @@ spec:
     ports:
     - protocol: TCP
       port: 8080
-    # OpenShift: platform Alertmanager and UWM Alertmanager
+    # OpenShift: platform Alertmanager
   - from:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: openshift-monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+    # OpenShift: User Workload Monitoring Alertmanager
+  - from:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: openshift-user-workload-monitoring
     ports:
     - protocol: TCP
       port: 8080
-    # causa-mcp in the same namespace — calls the backend REST API
+    # OpenShift: HAProxy ingress router
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-ingress
+    ports:
+    - protocol: TCP
+      port: 8080
+    # Both: causa-mcp pod in the same namespace
   - from:
     - podSelector:
         matchLabels:
