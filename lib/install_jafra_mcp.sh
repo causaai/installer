@@ -32,7 +32,7 @@ install_jafra_mcp() {
 
     if _jafra_mcp_not_released; then
         log_warn "Jafra MCP Server: image not yet released — skipping (set JAFRA_MCP_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     if ! create_namespace; then return 1; fi

@@ -64,6 +64,7 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 
 - **Waves:** a module runs in a later wave than all of its dependencies; within a wave, modules run sequentially in `modules.json` order. Uninstall runs in reverse order.
 - **Dependency not installed:** a dependent of a failed, skipped, or target-filtered module is skipped with a warning — or aborts the installer if the dependent is `required`.
+- **Skipped installs:** an `install_fn` that deliberately deploys nothing (for example, its image is unset) returns exit status `2`. The runner does not log it as installed or list it in the summary, and its dependents are skipped. Exit `0` means deployed (or a dry run); any other non-zero status is a failure.
 - **Validation:** `modules.json` is validated before any cluster work (JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, missing `source_lib` / functions).
 - **Not in the registry:** manifest paths and image variables stay in each `source_lib`, `lib/images.env` and `lib/validator.sh`. Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.
 

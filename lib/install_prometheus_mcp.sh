@@ -73,7 +73,7 @@ install_prometheus_mcp_server() {
 
     if _prometheus_mcp_not_released; then
         log_warn "Prometheus MCP Server: image not configured — skipping (set PROMETHEUS_MCP_SERVER_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     # OpenShift is not yet supported — skip cleanly instead of falling through
@@ -81,7 +81,7 @@ install_prometheus_mcp_server() {
     # monitoring namespace, a service that doesn't exist on OpenShift).
     if [[ "${INSTALL_TARGET:-kind}" != "kind" ]]; then
         write_to_log_file "INFO" "Prometheus MCP Server: skipping — OpenShift target not yet supported"
-        return 0
+        return 2   # nothing deployed
     fi
 
     # Prometheus MCP queries Prometheus for metrics. Verify Prometheus is running.

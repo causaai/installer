@@ -32,7 +32,7 @@ install_quarkus_mcp() {
 
     if _quarkus_mcp_not_released; then
         log_warn "Quarkus MCP Server: image not yet released — skipping (set QUARKUS_MCP_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     # Quarkus MCP queries Prometheus for metrics.  On kind we must verify that
