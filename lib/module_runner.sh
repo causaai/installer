@@ -21,6 +21,10 @@
 #               or aborts the install when the dependent is required.
 #   required    true  -> install failure aborts the installer (exit 1)
 #               false -> install failure logs a warning and installation continues
+#   skipped     an install_fn returning 2 deployed nothing on purpose (e.g. images
+#               unset).  It is not recorded as installed, so its dependents skip.
+#   functions   install_fn/uninstall_fn must be defined by the module's own
+#               source_lib; functions defined in any other file are rejected.
 #   uninstall   a failing uninstall_fn aborts the installer (exit 1).
 #
 # Not described by the registry (intentionally):
@@ -38,6 +42,9 @@ fi
 readonly MODULE_REGISTRY_LIB_LOADED=1
 
 readonly _REGISTRY_SUPPORTED_SCHEMA="1"
+
+# install_fn exit status meaning "nothing was deployed, but not an error".
+readonly REGISTRY_RC_SKIPPED=2
 
 # Parallel arrays — one slot per module, in modules.json order.
 _MOD_ID=()
@@ -204,7 +211,9 @@ _registry_compute_waves() {
 # on any problem so the caller can abort before touching the cluster.
 ################################################################################
 registry_load() {
-    local file="${1:-${MODULES_FILE:-${SCRIPT_DIR}/modules.json}}"
+    # The registry location is never taken from the environment: an ambient
+    # variable must not be able to choose which functions the installer runs.
+    local file="${1:-${SCRIPT_DIR}/modules.json}"
 
     if ! command -v jq >/dev/null 2>&1; then
         log_error "jq is required to read ${file} (https://jqlang.github.io/jq/download/)"
@@ -265,8 +274,11 @@ registry_load() {
         return 1
     fi
 
-    # Source libraries and verify functions
-    local i fn path failed=false
+    # Source libraries and verify functions.  A module may only reference
+    # functions that its own source_lib defines: a registry entry cannot point
+    # install_fn/uninstall_fn at core functions (e.g. uninstall_kind_cluster)
+    # defined elsewhere in the shell.
+    local i fn path failed=false fn_name fn_line fn_file
     for i in "${!_MOD_ID[@]}"; do
         path="${SCRIPT_DIR}/${_MOD_LIB[i]}"
         if [[ ! -f "${path}" ]]; then
@@ -277,7 +289,11 @@ registry_load() {
         # shellcheck source=/dev/null
         source "${path}"
         for fn in "${_MOD_INSTALL_FN[i]}" "${_MOD_UNINSTALL_FN[i]}"; do
-            if ! declare -F "${fn}" >/dev/null 2>&1; then
+            # With extdebug, `declare -F` prints "name line file" for the file
+            # that defined the function (subshell keeps the option scoped).
+            fn_file=""
+            read -r fn_name fn_line fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
+            if [[ "${fn_file}" != "${path}" ]]; then
                 log_error "modules.json: function '${fn}' (module '${_MOD_ID[i]}') is not defined by ${_MOD_LIB[i]}"
                 failed=true
             fi
@@ -297,7 +313,7 @@ registry_load() {
 registry_install_all() {
     REGISTRY_INSTALLED=()
     local status=()     # per module: ok | failed | skipped | filtered
-    local i dep d unmet name
+    local i dep d unmet name rc
 
     for i in "${_MOD_ORDER[@]}"; do
         name="${_MOD_NAME[i]}"
@@ -324,7 +340,15 @@ registry_install_all() {
         fi
 
         start_spinner "Installing ${name}..."
-        if ! "${_MOD_INSTALL_FN[i]}"; then
+        rc=0
+        "${_MOD_INSTALL_FN[i]}" || rc=$?
+        if [[ ${rc} -eq ${REGISTRY_RC_SKIPPED} ]]; then
+            # Function ran but deliberately deployed nothing (e.g. images unset):
+            # not a failure, not "installed" — dependents will be skipped.
+            stop_spinner
+            status[i]="skipped"
+            write_to_log_file "INFO" "${name}: nothing deployed — skipped"
+        elif [[ ${rc} -ne 0 ]]; then
             stop_spinner
             status[i]="failed"
             if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
