@@ -13,6 +13,7 @@ For a quick start, see the [README](../README.md).
 | `kind` | Local Kubernetes cluster | [kind.sigs.k8s.io](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) |
 | `kubectl` | Kubernetes CLI | [kubernetes.io](https://kubernetes.io/docs/tasks/tools/) |
 | `helm` | Prometheus Stack install | [helm.sh](https://helm.sh/docs/intro/install/) |
+| `jq` | Reads the module registry (`modules.json`) | [jqlang.github.io](https://jqlang.github.io/jq/download/) |
 | `curl`, `grep`, `sed`, `awk` | Script utilities | Pre-installed on macOS and most Linux distributions |
 
 > **Podman users:** Both rootful and rootless modes are supported. On macOS, ensure the machine is allocated sufficient resources:
@@ -26,6 +27,7 @@ For a quick start, see the [README](../README.md).
 | Tool | Purpose | Install |
 |---|---|---|
 | `oc` (preferred) or `kubectl` | Cluster CLI | [OpenShift CLI](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) / [kubectl](https://kubernetes.io/docs/tasks/tools/) |
+| `jq` | Reads the module registry (`modules.json`) | [jqlang.github.io](https://jqlang.github.io/jq/download/) |
 | `helm`, `curl`, `grep`, `sed`, `awk` | Script utilities | Pre-installed on most Linux distributions |
 | `python3` + `PyYAML` | Alertmanager config merge | `pip3 install pyyaml` |
 
@@ -114,15 +116,11 @@ See [Configuration](configuration.md) for the full reference.
 ### Kind
 
 1. Kind cluster + local registry
-2. Prometheus Stack (kube-prometheus-stack, `monitoring` namespace)
-3. cert-manager (installed from official release manifest via `kubectl apply -f`)
-4. Kubernetes MCP Server
-5. Jafra Ecosystem (Controller → Analyzer → Agent) _(skipped if images not set)_
-6. Jafra MCP Server _(skipped if image not set)_
-7. Quarkus MCP Server _(skipped if image not set)_
-8. PostgreSQL + pgvector
-9. Causa _(stamps MCP env vars + waits for rollout)_
-10. Causa MCP Server
+2. cert-manager (installed from official release manifest via `kubectl apply -f`)
+3. Registry modules from `modules.json`, in dependency waves (`depends_on`):
+   - Wave 1: Prometheus Stack (kube-prometheus-stack, `monitoring` namespace), Kubernetes MCP Server, Jafra Ecosystem (Controller → Analyzer → Agent) _(skipped if images not set)_, Quarkus MCP Server _(skipped if image not set)_, Prometheus MCP Server _(skipped if image not set)_, PostgreSQL + pgvector
+   - Wave 2: Jafra MCP Server _(skipped if image not set, or if Jafra was not deployed)_, Causa _(stamps MCP env vars + waits for rollout)_
+   - Wave 3: Causa MCP Server
 
 ### OpenShift
 

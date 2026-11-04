@@ -1,0 +1,95 @@
+{
+  "schema_version": "1",
+  "modules": [
+    {
+      "id": "prometheus",
+      "name": "Prometheus Stack",
+      "source_lib": "lib/install_prometheus.sh",
+      "install_fn": "install_prometheus",
+      "uninstall_fn": "uninstall_prometheus",
+      "targets": ["kind"],
+      "required": true,
+      "depends_on": []
+    },
+    {
+      "id": "k8s_mcp",
+      "name": "Kubernetes MCP Server",
+      "source_lib": "lib/install_k8s_mcp.sh",
+      "install_fn": "install_kubernetes_mcp_server",
+      "uninstall_fn": "uninstall_kubernetes_mcp_server",
+      "targets": ["*"],
+      "required": true,
+      "depends_on": []
+    },
+    {
+      "id": "jafra",
+      "name": "Jafra Ecosystem",
+      "source_lib": "lib/install_jafra.sh",
+      "install_fn": "install_jafra",
+      "uninstall_fn": "uninstall_jafra",
+      "targets": ["kind"],
+      "required": false,
+      "depends_on": []
+    },
+    {
+      "id": "jafra_mcp",
+      "name": "Jafra MCP Server",
+      "source_lib": "lib/install_jafra_mcp.sh",
+      "install_fn": "install_jafra_mcp",
+      "uninstall_fn": "uninstall_jafra_mcp",
+      "targets": ["kind"],
+      "required": false,
+      "depends_on": ["jafra"]
+    },
+    {
+      "id": "quarkus_mcp",
+      "name": "Quarkus MCP Server",
+      "source_lib": "lib/install_quarkus_mcp.sh",
+      "install_fn": "install_quarkus_mcp",
+      "uninstall_fn": "uninstall_quarkus_mcp",
+      "targets": ["*"],
+      "required": false,
+      "depends_on": []
+    },
+    {
+      "id": "prometheus_mcp",
+      "name": "Prometheus MCP Server",
+      "source_lib": "lib/install_prometheus_mcp.sh",
+      "install_fn": "install_prometheus_mcp_server",
+      "uninstall_fn": "uninstall_prometheus_mcp_server",
+      "targets": ["kind"],
+      "required": false,
+      "depends_on": []
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "source_lib": "lib/install_postgres.sh",
+      "install_fn": "install_postgres",
+      "uninstall_fn": "uninstall_postgres",
+      "targets": ["*"],
+      "required": true,
+      "depends_on": []
+    },
+    {
+      "id": "causa_backend",
+      "name": "Causa Backend",
+      "source_lib": "lib/install_causa.sh",
+      "install_fn": "install_causa",
+      "uninstall_fn": "uninstall_causa",
+      "targets": ["*"],
+      "required": true,
+      "depends_on": ["postgres"]
+    },
+    {
+      "id": "causa_mcp",
+      "name": "Causa MCP Server",
+      "source_lib": "lib/install_causa_mcp.sh",
+      "install_fn": "install_causa_mcp",
+      "uninstall_fn": "uninstall_causa_mcp",
+      "targets": ["*"],
+      "required": false,
+      "depends_on": ["causa_backend"]
+    }
+  ]
+}

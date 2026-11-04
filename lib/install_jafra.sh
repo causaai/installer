@@ -278,7 +278,7 @@ install_jafra() {
        [[ -z "${JAFRA_ANALYZER_IMAGE:-}" ]] || \
        [[ -z "${JAFRA_AGENT_IMAGE:-}" ]]; then
         log_warn "Jafra: one or more images not set — skipping (set JAFRA_*_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not treat Jafra as installed
     fi
 
     write_to_log_file "INFO" "Waiting for cert-manager webhook to be ready..."

@@ -24,12 +24,15 @@ Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
 - [`helm`](https://helm.sh/docs/intro/install/) — required for the Prometheus Stack
+- [`jq`](https://jqlang.github.io/jq/download/) — required to read the module registry (`modules.json`)
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
 
 ### OpenShift
 
 - [`oc`](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) (preferred) or `kubectl`
+- [`helm`](https://helm.sh/docs/intro/install/)
+- [`jq`](https://jqlang.github.io/jq/download/) — required to read the module registry (`modules.json`)
 - `curl`, `grep`, `sed`, `awk`
 - An active login to the target cluster (`oc login`)
 - `cert-manager` already installed in the cluster

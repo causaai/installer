@@ -48,6 +48,27 @@ When `install.sh` is run:
 5. Deploys components in sequence (see [Installation order](installation.md#installation-order))
 6. Runs post-installation health check and prints the access summary
 
+## Module registry (`modules.json`)
+
+Deployable components are declared in [`modules.json`](../modules.json) and run by [`lib/module_runner.sh`](../lib/module_runner.sh). Adding a component means adding an entry and a `lib/install_*.sh` — `install.sh` is not edited. Requires `jq`.
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique key (`[a-z0-9_]+`), referenced by `depends_on` |
+| `name` | Display name used in progress output and the summary |
+| `source_lib` | Library sourced by the registry (path relative to the installer root) |
+| `install_fn` / `uninstall_fn` | Functions defined by `source_lib` |
+| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are skipped silently |
+| `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
+| `depends_on` | Module ids that must be installed first |
+
+- **Waves:** a module runs in a later wave than all of its dependencies; within a wave, modules run sequentially in `modules.json` order. Uninstall runs in reverse order.
+- **Dependency not installed:** a dependent of a failed, skipped, or target-filtered module is skipped with a warning — or aborts the installer if the dependent is `required`.
+- **Skipped installs:** an `install_fn` that deliberately deploys nothing (for example, its image is unset) returns exit status `2`. The runner does not log it as installed or list it in the summary, and its dependents are skipped. Exit `0` means deployed (or a dry run); any other non-zero status is a failure.
+- **Validation:** `modules.json` is validated before any cluster work (JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, missing `source_lib` / functions).
+- **Not in the registry:** manifest paths and image variables stay in each `source_lib`, `lib/images.env` and `lib/validator.sh`. Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.
+
+
 ## Target-specific behaviour
 
 The `--target` flag (default: `kind`) controls which infrastructure steps run:
