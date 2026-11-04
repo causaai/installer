@@ -126,5 +126,13 @@ uninstall_quarkus_mcp() {
     return 0
 }
 
+################################################################################
+# quarkus_mcp_health — post-install health check used by registry_check_health
+################################################################################
+quarkus_mcp_health() {
+    check_deployment_healthy "mcp-metrics"
+}
+
 export -f install_quarkus_mcp
 export -f uninstall_quarkus_mcp
+export -f quarkus_mcp_health

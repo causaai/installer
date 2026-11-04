@@ -318,7 +318,8 @@ validate_image_overrides() {
 
 ################################################################################
 # post_component_validation
-# Health summary after all components are installed.
+# Health summary after all components are installed.  The per-module checks come
+# from the module registry (registry_check_health), not from a list kept here.
 ################################################################################
 post_component_validation() {
     local elapsed_label="${1:-}"
@@ -329,76 +330,16 @@ post_component_validation() {
         return 0
     fi
 
-    local failed=0
-
-    _check_deployment() {
-        local display="$1" deploy="$2" var="$3"
-        local rr dr
-        if ${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" &>/dev/null; then
-            rr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
-                    -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-            dr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
-                    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
-            if [[ "${rr:-0}" == "${dr}" ]]; then
-                printf -v "${var}" '%b' "${COLOR_BOLD_GREEN}${display} ✓${COLOR_RESET}"
-                write_to_log_file "SUCCESS" "${display} is healthy"
-            else
-                printf -v "${var}" '%b' "${COLOR_BOLD_RED}${display} ✗${COLOR_RESET}"
-                write_to_log_file "ERROR" "${display} pods not ready: ${rr:-0}/${dr}"
-                (( failed++ ))
-            fi
-        else
-            printf -v "${var}" '%b' "${COLOR_YELLOW}${display} — not installed${COLOR_RESET}"
-            write_to_log_file "INFO" "${display} deployment not found (skipped)"
-        fi
-    }
-
-    # On OpenShift, PostgreSQL is a CNPG Cluster — check the primary pod directly,
-    # not a Deployment (which doesn't exist on that target).
-    _check_postgres_ocp() {
-        local var="$1"
-        local phase
-        phase=$(${KUBE_CLI} get cluster.postgresql.cnpg.io iri-db \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        if [[ "${phase}" == "Cluster in healthy state" ]]; then
-            printf -v "${var}" '%b' "${COLOR_BOLD_GREEN}PostgreSQL (CNPG) ✓${COLOR_RESET}"
-            write_to_log_file "SUCCESS" "PostgreSQL (CNPG) is healthy"
-        elif [[ -n "${phase}" ]]; then
-            printf -v "${var}" '%b' "${COLOR_BOLD_RED}PostgreSQL (CNPG) ✗ — ${phase}${COLOR_RESET}"
-            write_to_log_file "ERROR" "PostgreSQL (CNPG) not healthy: ${phase}"
-            (( failed++ ))
-        else
-            printf -v "${var}" '%b' "${COLOR_YELLOW}PostgreSQL — not installed${COLOR_RESET}"
-            write_to_log_file "INFO" "PostgreSQL CNPG cluster not found (skipped)"
-        fi
-    }
-
-    local k8s_mcp_status jafra_mcp_status quarkus_status prom_mcp_status postgres_status causa_status causa_mcp_status
-
-    _check_deployment "Kubernetes MCP Server"  "kubernetes-mcp-server"  k8s_mcp_status
-    _check_deployment "Jafra MCP Server"       "jafra-mcp"              jafra_mcp_status
-    _check_deployment "Quarkus MCP Server"     "mcp-metrics"            quarkus_status
-    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        _check_postgres_ocp postgres_status
-    else
-        _check_deployment "PostgreSQL"         "postgres"               postgres_status
-    fi
-    _check_deployment "Prometheus MCP Server"  "prometheus-mcp-server"  prom_mcp_status
-    _check_deployment "Causa Backend"          "causa-backend"          causa_status
-    _check_deployment "Causa MCP Server"       "causa-mcp"              causa_mcp_status
+    local failed=0 line
+    registry_check_health || failed=$?
 
     {
         echo ""
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Component Health Summary${COLOR_RESET}"
         echo ""
-        echo -e "${k8s_mcp_status}"
-        echo -e "${jafra_mcp_status}"
-        echo -e "${quarkus_status}"
-        echo -e "${prom_mcp_status}"
-        echo -e "${postgres_status}"
-        echo -e "${causa_status}"
-        echo -e "${causa_mcp_status}"
+        for line in "${REGISTRY_HEALTH_LINES[@]+"${REGISTRY_HEALTH_LINES[@]}"}"; do
+            echo -e "${line}"
+        done
         echo ""
         [[ -n "${elapsed_label}" ]] && echo -e "${COLOR_BOLD_YELLOW}Total installation time: ${elapsed_label}${COLOR_RESET}" && echo ""
     } >/dev/tty 2>/dev/null || true
@@ -407,7 +348,7 @@ post_component_validation() {
         write_to_log_file "SUCCESS" "All components passed health validation"
         return 0
     else
-        log_error "${failed} component(s) failed health validation"
+        log_error "One or more components failed health validation"
         return 1
     fi
 }

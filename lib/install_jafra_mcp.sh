@@ -80,5 +80,13 @@ uninstall_jafra_mcp() {
     return 0
 }
 
+################################################################################
+# jafra_mcp_health — post-install health check used by registry_check_health
+################################################################################
+jafra_mcp_health() {
+    check_deployment_healthy "jafra-mcp"
+}
+
 export -f install_jafra_mcp
 export -f uninstall_jafra_mcp
+export -f jafra_mcp_health
