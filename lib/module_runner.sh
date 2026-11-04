@@ -15,7 +15,9 @@
 #
 # Semantics
 #   targets     "*" matches any INSTALL_TARGET; otherwise the value must equal it.
-#               A module that does not match is silently skipped.
+#               A module that does not match is not sourced or installed.  It is
+#               listed once in the log file (not on the terminal) in a "Modules
+#               not applicable to target" section.
 #   depends_on  a module is placed in a later wave than everything it depends on.
 #               If a dependency was not installed (failed, skipped, or not
 #               applicable to the target) the dependent is skipped with a warning,

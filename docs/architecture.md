@@ -58,7 +58,7 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 | `name` | Display name used in progress output and the summary |
 | `source_lib` | Library sourced by the registry (path relative to the installer root). Only sourced when the module matches `INSTALL_TARGET` |
 | `install_fn` / `uninstall_fn` | Functions defined by `source_lib` |
-| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are skipped silently |
+| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are not sourced or installed; they are listed once in the install log under "Modules not applicable to target" and not shown on the terminal |
 | `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
 | `depends_on` | Module ids that must be installed first |
 
