@@ -6,8 +6,9 @@
 # Configuration-driven runner for the deployable components declared in
 # modules.json (schema_version "1").  Provides:
 #
-#   registry_load           parse + validate modules.json, source every module's
-#                           source_lib, compute dependency waves
+#   registry_load           parse + validate modules.json, compute dependency
+#                           waves, source the source_lib of every module that
+#                           matches INSTALL_TARGET
 #   registry_install_all    install every module that matches INSTALL_TARGET,
 #                           wave by wave (modules.json order inside a wave)
 #   registry_uninstall_all  uninstall matching modules in reverse install order
@@ -274,12 +275,14 @@ registry_load() {
         return 1
     fi
 
-    # Source libraries and verify functions.  A module may only reference
-    # functions that its own source_lib defines: a registry entry cannot point
-    # install_fn/uninstall_fn at core functions (e.g. uninstall_kind_cluster)
-    # defined elsewhere in the shell.
-    local i fn path failed=false fn_name fn_line fn_file
+    # Source libraries and verify functions.  Only modules that apply to
+    # INSTALL_TARGET are sourced, so libraries of other targets are never
+    # loaded.  A module may only reference functions that its own source_lib
+    # defines: a registry entry cannot point install_fn/uninstall_fn at core
+    # functions (e.g. uninstall_kind_cluster) defined elsewhere in the shell.
+    local i fn path failed=false fn_file
     for i in "${!_MOD_ID[@]}"; do
+        _registry_matches_target "${i}" || continue
         path="${SCRIPT_DIR}/${_MOD_LIB[i]}"
         if [[ ! -f "${path}" ]]; then
             log_error "modules.json: source_lib for '${_MOD_ID[i]}' not found: ${_MOD_LIB[i]}"
@@ -292,7 +295,7 @@ registry_load() {
             # With extdebug, `declare -F` prints "name line file" for the file
             # that defined the function (subshell keeps the option scoped).
             fn_file=""
-            read -r fn_name fn_line fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
+            read -r _ _ fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
             if [[ "${fn_file}" != "${path}" ]]; then
                 log_error "modules.json: function '${fn}' (module '${_MOD_ID[i]}') is not defined by ${_MOD_LIB[i]}"
                 failed=true
@@ -313,16 +316,24 @@ registry_load() {
 registry_install_all() {
     REGISTRY_INSTALLED=()
     local status=()     # per module: ok | failed | skipped | filtered
-    local i dep d unmet name rc
+    local i dep d unmet name rc not_applicable=""
+
+    # Report non-applicable modules once, up front, so the skips are not
+    # interleaved with (and mistaken for part of) another module's output.
+    for i in "${_MOD_ORDER[@]}"; do
+        _registry_matches_target "${i}" && continue
+        status[i]="filtered"
+        not_applicable+="${not_applicable:+, }${_MOD_NAME[i]}"
+    done
+    if [[ -n "${not_applicable}" ]]; then
+        log_section_silent "Modules not applicable to target '${INSTALL_TARGET:-kind}'"
+        write_to_log_file "INFO" "Not installed: ${not_applicable}"
+    fi
 
     for i in "${_MOD_ORDER[@]}"; do
         name="${_MOD_NAME[i]}"
 
-        if ! _registry_matches_target "${i}"; then
-            status[i]="filtered"
-            write_to_log_file "INFO" "${name}: not applicable to target '${INSTALL_TARGET:-kind}' — skipped"
-            continue
-        fi
+        [[ "${status[i]:-}" == "filtered" ]] && continue
 
         unmet=""
         for dep in ${_MOD_DEPS[i]}; do
