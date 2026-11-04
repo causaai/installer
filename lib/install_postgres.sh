@@ -417,6 +417,7 @@ uninstall_postgres() {
 # postgres_health — post-install health check used by registry_check_health
 # OpenShift: PostgreSQL is a CNPG Cluster, not a Deployment — check its phase.
 # kind:      plain "postgres" Deployment.
+# Returns 0 healthy, 1 unhealthy (phase on stdout), 2 not installed.
 ################################################################################
 postgres_health() {
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
@@ -426,10 +427,13 @@ postgres_health() {
         if [[ "${phase}" == "Cluster in healthy state" ]]; then
             write_to_log_file "SUCCESS" "PostgreSQL (CNPG) is healthy"
             return 0
+        elif [[ -n "${phase}" ]]; then
+            write_to_log_file "ERROR" "PostgreSQL (CNPG) not healthy: ${phase}"
+            echo "${phase}"
+            return 1
         fi
-        write_to_log_file "ERROR" "PostgreSQL (CNPG) not healthy: ${phase:-not found}"
-        echo "${phase:-not found}"
-        return 1
+        write_to_log_file "INFO" "PostgreSQL CNPG cluster not found (skipped)"
+        return 2
     fi
     check_deployment_healthy "postgres"
 }

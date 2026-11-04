@@ -239,8 +239,8 @@ wait_for_deployment() {
 ################################################################################
 # Check that a deployment has all of its replicas ready
 # Usage: check_deployment_healthy <name> [namespace]
-# Returns 0 when readyReplicas == spec.replicas.  On failure prints a short
-# detail ("not found" or "<ready>/<desired> ready") on stdout and returns 1.
+# Returns 0 when readyReplicas == spec.replicas, 1 when it exists but is not
+# ready, and 2 when the deployment does not exist (not installed).
 ################################################################################
 check_deployment_healthy() {
     local name="$1"
@@ -248,9 +248,8 @@ check_deployment_healthy() {
     local ready desired
 
     if ! ${KUBE_CLI} get deployment "${name}" -n "${ns}" &>/dev/null; then
-        write_to_log_file "ERROR" "Deployment ${name} not found in ${ns}"
-        echo "not found"
-        return 1
+        write_to_log_file "INFO" "Deployment ${name} not found (skipped)"
+        return 2
     fi
 
     ready=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
@@ -264,7 +263,6 @@ check_deployment_healthy() {
     fi
 
     write_to_log_file "ERROR" "Deployment ${name} pods not ready: ${ready:-0}/${desired}"
-    echo "${ready:-0}/${desired} ready"
     return 1
 }
 

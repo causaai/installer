@@ -407,16 +407,20 @@ _registry_health_fn() {
 ################################################################################
 # registry_check_health
 # Health-checks the modules that match INSTALL_TARGET, in install order, using
-# each module's <id>_health function (exit 0 = healthy; stdout = failure detail).
-#   - no <id>_health function  -> not checked
-#   - install skipped/failed   -> reported as "not installed", not a failure
-#   - not applicable to target -> omitted
+# each module's <id>_health function.  The check is against live cluster state
+# and runs whatever the module's install status was, so a leftover unhealthy
+# deployment from a failed or skipped install is still reported.
+#   health function exit 0 -> healthy (✓)
+#   health function exit 2 -> not deployed (yellow "not installed"), no failure
+#   any other exit         -> unhealthy (✗); stdout, if any, is shown as detail
+#   no <id>_health         -> not checked
+#   not applicable to target -> omitted
 # Populates REGISTRY_HEALTH_LINES with one colored line per checked module.
 # Returns 1 if any checked module is unhealthy.
 ################################################################################
 registry_check_health() {
     REGISTRY_HEALTH_LINES=()
-    local failed=0 i fn name detail
+    local failed=0 i fn name detail rc
 
     for i in "${_MOD_ORDER[@]}"; do
         _registry_matches_target "${i}" || continue
@@ -424,19 +428,20 @@ registry_check_health() {
         [[ -n "${fn}" ]] || continue
         name="${_MOD_NAME[i]}"
 
-        if [[ "${_MOD_STATUS[i]:-}" != "ok" ]]; then
-            REGISTRY_HEALTH_LINES+=("${COLOR_YELLOW}${name} — not installed${COLOR_RESET}")
-            write_to_log_file "INFO" "${name} was not installed (skipped)"
-            continue
-        fi
-
-        detail=""
-        if detail=$("${fn}"); then
-            REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_GREEN}${name} ✓${COLOR_RESET}")
-        else
-            REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_RED}${name} ✗${detail:+ — ${detail}}${COLOR_RESET}")
-            failed=$(( failed + 1 ))
-        fi
+        rc=0
+        detail=$("${fn}") || rc=$?
+        case "${rc}" in
+            0)
+                REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_GREEN}${name} ✓${COLOR_RESET}")
+                ;;
+            2)
+                REGISTRY_HEALTH_LINES+=("${COLOR_YELLOW}${name} — not installed${COLOR_RESET}")
+                ;;
+            *)
+                REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_RED}${name} ✗${detail:+ — ${detail}}${COLOR_RESET}")
+                failed=$(( failed + 1 ))
+                ;;
+        esac
     done
 
     [[ ${failed} -eq 0 ]]
