@@ -56,14 +56,15 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 |---|---|
 | `id` | Unique key (`[a-z0-9_]+`), referenced by `depends_on` |
 | `name` | Display name used in progress output and the summary |
-| `source_lib` | Library sourced by the registry (path relative to the installer root) |
+| `source_lib` | Library sourced by the registry (path relative to the installer root). Only sourced when the module matches `INSTALL_TARGET` |
 | `install_fn` / `uninstall_fn` | Functions defined by `source_lib` |
-| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are skipped silently |
+| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are not sourced or installed; they are listed once in the install log under "Modules not applicable to target" and not shown on the terminal |
 | `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
 | `depends_on` | Module ids that must be installed first |
 
 - **Waves:** a module runs in a later wave than all of its dependencies; within a wave, modules run sequentially in `modules.json` order. Uninstall runs in reverse order.
 - **Dependency not installed:** a dependent of a failed, skipped, or target-filtered module is skipped with a warning — or aborts the installer if the dependent is `required`.
+- **Health checks:** nothing is declared in `modules.json`. After the install, `post_component_validation` calls `registry_check_health`, which looks for a function named `<id>_health` (for example `k8s_mcp_health`, `postgres_health`) defined by the module's own `source_lib`. Exit `0` means healthy; anything printed to stdout is shown as the failure detail. A module without one is not checked, a module whose install was skipped or failed is reported as "not installed", and modules not applicable to the target are omitted. `check_deployment_healthy <deployment>` in `lib/install_utils.sh` covers the common case of a plain Deployment. The check is skipped on `--dry-run`, since nothing is deployed.
 - **Skipped installs:** an `install_fn` that deliberately deploys nothing (for example, its image is unset) returns exit status `2`. The runner does not log it as installed or list it in the summary, and its dependents are skipped. Exit `0` means deployed (or a dry run); any other non-zero status is a failure.
 - **Validation:** `modules.json` is validated before any cluster work (JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, missing `source_lib` / functions).
 - **Not in the registry:** manifest paths and image variables stay in each `source_lib`, `lib/images.env` and `lib/validator.sh`. Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.

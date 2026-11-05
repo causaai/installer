@@ -6,15 +6,20 @@
 # Configuration-driven runner for the deployable components declared in
 # modules.json (schema_version "1").  Provides:
 #
-#   registry_load           parse + validate modules.json, source every module's
-#                           source_lib, compute dependency waves
+#   registry_load           parse + validate modules.json, compute dependency
+#                           waves, source the source_lib of every module that
+#                           matches INSTALL_TARGET
 #   registry_install_all    install every module that matches INSTALL_TARGET,
 #                           wave by wave (modules.json order inside a wave)
+#   registry_check_health   health-check the modules registry_install_all
+#                           installed, via each module's <id>_health function
 #   registry_uninstall_all  uninstall matching modules in reverse install order
 #
 # Semantics
 #   targets     "*" matches any INSTALL_TARGET; otherwise the value must equal it.
-#               A module that does not match is silently skipped.
+#               A module that does not match is not sourced or installed.  It is
+#               listed once in the log file (not on the terminal) in a "Modules
+#               not applicable to target" section.
 #   depends_on  a module is placed in a later wave than everything it depends on.
 #               If a dependency was not installed (failed, skipped, or not
 #               applicable to the target) the dependent is skipped with a warning,
@@ -26,6 +31,11 @@
 #   functions   install_fn/uninstall_fn must be defined by the module's own
 #               source_lib; functions defined in any other file are rejected.
 #   uninstall   a failing uninstall_fn aborts the installer (exit 1).
+#   health      optional, by naming convention (nothing is declared in
+#               modules.json): a function <id>_health defined by the module's own
+#               source_lib.  Exit 0 = healthy; stdout is shown as the failure
+#               detail.  A module without one is not health-checked; a module
+#               not applicable to the target is omitted from the report.
 #
 # Not described by the registry (intentionally):
 #   - manifest paths  (owned by each module's source_lib)
@@ -54,12 +64,16 @@ _MOD_INSTALL_FN=()
 _MOD_UNINSTALL_FN=()
 _MOD_TARGETS=()     # space-separated
 _MOD_REQUIRED=()    # "true" | "false"
+_MOD_STATUS=()      # set by registry_install_all: ok | failed | skipped | filtered
 _MOD_DEPS=()        # space-separated module ids
 _MOD_WAVE=()        # 1-based dependency wave
 _MOD_ORDER=()       # module indices sorted by (wave, modules.json position)
 
 # Names of modules installed by the last registry_install_all call
 REGISTRY_INSTALLED=()
+
+# One colored line per checked module from the last registry_check_health call
+REGISTRY_HEALTH_LINES=()
 
 ################################################################################
 # _registry_schema_errors FILE
@@ -274,12 +288,14 @@ registry_load() {
         return 1
     fi
 
-    # Source libraries and verify functions.  A module may only reference
-    # functions that its own source_lib defines: a registry entry cannot point
-    # install_fn/uninstall_fn at core functions (e.g. uninstall_kind_cluster)
-    # defined elsewhere in the shell.
-    local i fn path failed=false fn_name fn_line fn_file
+    # Source libraries and verify functions.  Only modules that apply to
+    # INSTALL_TARGET are sourced, so libraries of other targets are never
+    # loaded.  A module may only reference functions that its own source_lib
+    # defines: a registry entry cannot point install_fn/uninstall_fn at core
+    # functions (e.g. uninstall_kind_cluster) defined elsewhere in the shell.
+    local i fn path failed=false fn_file
     for i in "${!_MOD_ID[@]}"; do
+        _registry_matches_target "${i}" || continue
         path="${SCRIPT_DIR}/${_MOD_LIB[i]}"
         if [[ ! -f "${path}" ]]; then
             log_error "modules.json: source_lib for '${_MOD_ID[i]}' not found: ${_MOD_LIB[i]}"
@@ -292,7 +308,7 @@ registry_load() {
             # With extdebug, `declare -F` prints "name line file" for the file
             # that defined the function (subshell keeps the option scoped).
             fn_file=""
-            read -r fn_name fn_line fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
+            read -r _ _ fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
             if [[ "${fn_file}" != "${path}" ]]; then
                 log_error "modules.json: function '${fn}' (module '${_MOD_ID[i]}') is not defined by ${_MOD_LIB[i]}"
                 failed=true
@@ -312,25 +328,33 @@ registry_load() {
 ################################################################################
 registry_install_all() {
     REGISTRY_INSTALLED=()
-    local status=()     # per module: ok | failed | skipped | filtered
-    local i dep d unmet name rc
+    _MOD_STATUS=()      # per module: ok | failed | skipped | filtered
+    local i dep d unmet name rc not_applicable=""
+
+    # Report non-applicable modules once, up front, so the skips are not
+    # interleaved with (and mistaken for part of) another module's output.
+    for i in "${_MOD_ORDER[@]}"; do
+        _registry_matches_target "${i}" && continue
+        _MOD_STATUS[i]="filtered"
+        not_applicable+="${not_applicable:+, }${_MOD_NAME[i]}"
+    done
+    if [[ -n "${not_applicable}" ]]; then
+        log_section_silent "Modules not applicable to target '${INSTALL_TARGET:-kind}'"
+        write_to_log_file "INFO" "Not installed: ${not_applicable}"
+    fi
 
     for i in "${_MOD_ORDER[@]}"; do
         name="${_MOD_NAME[i]}"
 
-        if ! _registry_matches_target "${i}"; then
-            status[i]="filtered"
-            write_to_log_file "INFO" "${name}: not applicable to target '${INSTALL_TARGET:-kind}' — skipped"
-            continue
-        fi
+        [[ "${_MOD_STATUS[i]:-}" == "filtered" ]] && continue
 
         unmet=""
         for dep in ${_MOD_DEPS[i]}; do
             d=$(_registry_index_of "${dep}")
-            [[ "${status[d]:-}" == "ok" ]] || unmet+="${unmet:+ }${dep}"
+            [[ "${_MOD_STATUS[d]:-}" == "ok" ]] || unmet+="${unmet:+ }${dep}"
         done
         if [[ -n "${unmet}" ]]; then
-            status[i]="skipped"
+            _MOD_STATUS[i]="skipped"
             if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
                 log_error "Cannot install ${name}: dependency not installed (${unmet})"
                 exit 1
@@ -346,11 +370,11 @@ registry_install_all() {
             # Function ran but deliberately deployed nothing (e.g. images unset):
             # not a failure, not "installed" — dependents will be skipped.
             stop_spinner
-            status[i]="skipped"
+            _MOD_STATUS[i]="skipped"
             write_to_log_file "INFO" "${name}: nothing deployed — skipped"
         elif [[ ${rc} -ne 0 ]]; then
             stop_spinner
-            status[i]="failed"
+            _MOD_STATUS[i]="failed"
             if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
                 log_error "Failed to install ${name}"
                 exit 1
@@ -358,12 +382,69 @@ registry_install_all() {
             log_warn "${name} installation skipped or failed"
         else
             stop_spinner
-            status[i]="ok"
+            _MOD_STATUS[i]="ok"
             log_install_success "${name}"
             REGISTRY_INSTALLED+=("${name}")
         fi
     done
     return 0
+}
+
+################################################################################
+# _registry_health_fn INDEX
+# Prints the module's health function name (<id>_health) if its own source_lib
+# defines one; prints nothing otherwise.  Same origin rule as install_fn: a
+# function defined in any other file is ignored.
+################################################################################
+_registry_health_fn() {
+    local fn="${_MOD_ID[$1]}_health" fn_file=""
+    read -r _ _ fn_file < <( shopt -s extdebug; declare -F "${fn}" 2>/dev/null ) || true
+    if [[ "${fn_file}" == "${SCRIPT_DIR}/${_MOD_LIB[$1]}" ]]; then
+        echo "${fn}"
+    fi
+}
+
+################################################################################
+# registry_check_health
+# Health-checks the modules that match INSTALL_TARGET, in install order, using
+# each module's <id>_health function.  The check is against live cluster state
+# and runs whatever the module's install status was, so a leftover unhealthy
+# deployment from a failed or skipped install is still reported.
+#   health function exit 0 -> healthy (✓)
+#   health function exit 2 -> not deployed (yellow "not installed"), no failure
+#   any other exit         -> unhealthy (✗); stdout, if any, is shown as detail
+#   no <id>_health         -> not checked
+#   not applicable to target -> omitted
+# Populates REGISTRY_HEALTH_LINES with one colored line per checked module.
+# Returns 1 if any checked module is unhealthy.
+################################################################################
+registry_check_health() {
+    REGISTRY_HEALTH_LINES=()
+    local failed=0 i fn name detail rc
+
+    for i in "${_MOD_ORDER[@]}"; do
+        _registry_matches_target "${i}" || continue
+        fn=$(_registry_health_fn "${i}")
+        [[ -n "${fn}" ]] || continue
+        name="${_MOD_NAME[i]}"
+
+        rc=0
+        detail=$("${fn}") || rc=$?
+        case "${rc}" in
+            0)
+                REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_GREEN}${name} ✓${COLOR_RESET}")
+                ;;
+            2)
+                REGISTRY_HEALTH_LINES+=("${COLOR_YELLOW}${name} — not installed${COLOR_RESET}")
+                ;;
+            *)
+                REGISTRY_HEALTH_LINES+=("${COLOR_BOLD_RED}${name} ✗${detail:+ — ${detail}}${COLOR_RESET}")
+                failed=$(( failed + 1 ))
+                ;;
+        esac
+    done
+
+    [[ ${failed} -eq 0 ]]
 }
 
 ################################################################################

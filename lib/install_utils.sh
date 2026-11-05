@@ -237,6 +237,36 @@ wait_for_deployment() {
 }
 
 ################################################################################
+# Check that a deployment has all of its replicas ready
+# Usage: check_deployment_healthy <name> [namespace]
+# Returns 0 when readyReplicas == spec.replicas, 1 when it exists but is not
+# ready, and 2 when the deployment does not exist (not installed).
+################################################################################
+check_deployment_healthy() {
+    local name="$1"
+    local ns="${2:-${INSTALL_NAMESPACE}}"
+    local ready desired
+
+    if ! ${KUBE_CLI} get deployment "${name}" -n "${ns}" &>/dev/null; then
+        write_to_log_file "INFO" "Deployment ${name} not found (skipped)"
+        return 2
+    fi
+
+    ready=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    desired=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+
+    if [[ "${ready:-0}" == "${desired}" ]]; then
+        write_to_log_file "SUCCESS" "Deployment ${name} is healthy"
+        return 0
+    fi
+
+    write_to_log_file "ERROR" "Deployment ${name} pods not ready: ${ready:-0}/${desired}"
+    return 1
+}
+
+################################################################################
 # Calculate elapsed time label
 # Usage: label=$(calculate_elapsed_label <start_epoch>)
 ################################################################################
@@ -331,6 +361,7 @@ export -f check_command_exists
 export -f create_namespace
 export -f delete_namespace
 export -f wait_for_deployment
+export -f check_deployment_healthy
 export -f calculate_elapsed_label
 export -f apply_manifest
 export -f delete_manifest

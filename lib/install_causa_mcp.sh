@@ -122,6 +122,14 @@ uninstall_causa_mcp() {
     return 0
 }
 
+################################################################################
+# causa_mcp_health — post-install health check used by registry_check_health
+################################################################################
+causa_mcp_health() {
+    check_deployment_healthy "causa-mcp"
+}
+
 export -f _validate_causa_backend_ready
 export -f install_causa_mcp
 export -f uninstall_causa_mcp
+export -f causa_mcp_health

@@ -91,5 +91,13 @@ uninstall_kubernetes_mcp_server() {
     return 0
 }
 
+################################################################################
+# k8s_mcp_health — post-install health check used by registry_check_health
+################################################################################
+k8s_mcp_health() {
+    check_deployment_healthy "kubernetes-mcp-server"
+}
+
 export -f install_kubernetes_mcp_server
 export -f uninstall_kubernetes_mcp_server
+export -f k8s_mcp_health

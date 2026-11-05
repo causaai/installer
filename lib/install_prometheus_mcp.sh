@@ -163,6 +163,14 @@ uninstall_prometheus_mcp_server() {
     return 0
 }
 
+################################################################################
+# prometheus_mcp_health — post-install health check used by registry_check_health
+################################################################################
+prometheus_mcp_health() {
+    check_deployment_healthy "prometheus-mcp-server"
+}
+
 export -f discover_prometheus_url
 export -f install_prometheus_mcp_server
 export -f uninstall_prometheus_mcp_server
+export -f prometheus_mcp_health

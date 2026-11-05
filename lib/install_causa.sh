@@ -292,5 +292,13 @@ uninstall_causa() {
     return 0
 }
 
+################################################################################
+# causa_backend_health — post-install health check used by registry_check_health
+################################################################################
+causa_backend_health() {
+    check_deployment_healthy "causa-backend"
+}
+
 export -f install_causa
 export -f uninstall_causa
+export -f causa_backend_health
