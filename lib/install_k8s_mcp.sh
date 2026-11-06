@@ -10,6 +10,9 @@
 if [[ -n "${INSTALL_K8S_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_K8S_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 # ---------------------------------------------------------------------------
 # Global variable defaults — safe to source standalone or from other entrypoints
 # ---------------------------------------------------------------------------
@@ -48,7 +51,7 @@ install_kubernetes_mcp_server() {
         return 1
     fi
 
-    if ! wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" 300; then
+    if ! wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
         log_error "Kubernetes MCP Server did not become ready"
         return 1
     fi

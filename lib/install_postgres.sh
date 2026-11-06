@@ -16,6 +16,9 @@
 if [[ -n "${INSTALL_POSTGRES_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_POSTGRES_LIB_LOADED=1
 
+# Seconds to wait for the postgres Deployment to become Available
+POSTGRES_DEPLOY_TIMEOUT="${POSTGRES_DEPLOY_TIMEOUT:-180}"
+
 # ── Shared constants ──────────────────────────────────────────────────────────
 readonly _PG_SECRET_NAME="causa-db-secrets"
 readonly _PG_DB_NAME="iri-db"
@@ -343,7 +346,7 @@ install_postgres() {
         return 1
     fi
 
-    if ! wait_for_deployment "postgres" "${INSTALL_NAMESPACE}" 180; then
+    if ! wait_for_deployment "postgres" "${INSTALL_NAMESPACE}" "${POSTGRES_DEPLOY_TIMEOUT}"; then
         log_error "Postgres did not become ready in time"
         return 1
     fi

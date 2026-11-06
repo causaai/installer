@@ -20,10 +20,15 @@
 #               A module that does not match is not sourced or installed.  It is
 #               listed once in the log file (not on the terminal) in a "Modules
 #               not applicable to target" section.
-#   depends_on  a module is placed in a later wave than everything it depends on.
-#               If a dependency was not installed (failed, skipped, or not
-#               applicable to the target) the dependent is skipped with a warning,
-#               or aborts the install when the dependent is required.
+#   depends_on  a module runs in a later wave than its dependencies.  If one was
+#               not installed (failed or skipped) the dependent is skipped with a
+#               warning, or aborts the install if it is required.  Dependencies
+#               not applicable to INSTALL_TARGET are ignored.
+#   parallel    modules in a wave install concurrently, one subshell each; their
+#               log output is buffered and appended to LOG_FILE after the wave,
+#               in modules.json order.  Fail-fast: when a required module fails,
+#               the rest of the wave is stopped and the installer exits 1.
+#               install_fn runs in a subshell: share state via the cluster.
 #   required    true  -> install failure aborts the installer (exit 1)
 #               false -> install failure logs a warning and installation continues
 #   skipped     an install_fn returning 2 deployed nothing on purpose (e.g. images
@@ -74,6 +79,10 @@ REGISTRY_INSTALLED=()
 
 # One colored line per checked module from the last registry_check_health call
 REGISTRY_HEALTH_LINES=()
+
+# State of the parallel wave in flight, used by the INT/TERM handler
+_REGISTRY_WAVE_PIDS=()
+_REGISTRY_WAVE_DIR=""
 
 ################################################################################
 # _registry_schema_errors FILE
@@ -322,14 +331,183 @@ registry_load() {
 }
 
 ################################################################################
+# _registry_finish_module INDEX RC
+# Records the outcome of one install_fn (exit status RC): sets _MOD_STATUS,
+# reports it, and appends to REGISTRY_INSTALLED on success.  Any spinner must
+# already be stopped.  Returns 1 when a required module failed, so the caller
+# can abort the installer.
+################################################################################
+_registry_finish_module() {
+    local i="$1" rc="$2" name="${_MOD_NAME[$1]}"
+
+    if [[ ${rc} -eq ${REGISTRY_RC_SKIPPED} ]]; then
+        # Function ran but deliberately deployed nothing (e.g. images unset):
+        # not a failure, not "installed" — dependents will be skipped.
+        _MOD_STATUS[i]="skipped"
+        write_to_log_file "INFO" "${name}: nothing deployed — skipped"
+    elif [[ ${rc} -ne 0 ]]; then
+        _MOD_STATUS[i]="failed"
+        if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
+            log_error "Failed to install ${name}"
+            return 1
+        fi
+        log_warn "${name} installation skipped or failed"
+    else
+        _MOD_STATUS[i]="ok"
+        log_install_success "${name}"
+        REGISTRY_INSTALLED+=("${name}")
+    fi
+    return 0
+}
+
+################################################################################
+# _registry_abort_wave SIGNAL
+# INT/TERM handler while a parallel wave runs: stops the background installs,
+# removes their buffered output and re-raises SIGNAL.  (Without job control,
+# background jobs ignore the terminal's SIGINT, so they must be killed here.)
+################################################################################
+_registry_abort_wave() {
+    local sig="$1" pid
+    stop_spinner
+    for pid in "${_REGISTRY_WAVE_PIDS[@]}"; do
+        pkill -TERM -P "${pid}" 2>/dev/null || true
+        kill -TERM "${pid}" 2>/dev/null || true
+    done
+    [[ -n "${_REGISTRY_WAVE_DIR:-}" ]] && rm -rf "${_REGISTRY_WAVE_DIR}"
+    trap - "${sig}"
+    kill -s "${sig}" "$$"
+}
+
+################################################################################
+# _registry_job_done PID — returns 0 once the background job PID has exited
+# (gone, or a zombie not yet reaped by `wait`).
+################################################################################
+_registry_job_done() {
+    local state
+    state=$(ps -p "$1" -o stat= 2>/dev/null) || state=""
+    [[ -z "${state}" || "${state}" == Z* ]]
+}
+
+################################################################################
+# _registry_run_parallel INDEX...
+# Installs the given modules concurrently (one background subshell each) and
+# waits for them.  Each module's output is buffered under a temp dir and
+# written out only after the wave ends, in the order given, so it is never
+# interleaved:  <id>.log -> LOG_FILE,  <id>.out -> stdout,  <id>.err -> stderr.
+# Fail-fast: the first required module that fails stops the modules of the wave
+# that are still running (reported as aborted); everything is then flushed.
+# Returns 1 if a required module failed.
+################################################################################
+_registry_run_parallel() {
+    local i names="" k rc failed=0 dir id prev_int prev_term
+    local mods=("$@") remaining=$# culprit=-1
+    _REGISTRY_WAVE_PIDS=()
+    local rcs=()
+
+    dir=$(mktemp -d "${TMPDIR:-/tmp}/causa-$$-wave-XXXXXX") || {
+        log_error "Failed to create a temporary directory for parallel install"
+        return 1
+    }
+    _REGISTRY_WAVE_DIR="${dir}"
+
+    for i in "$@"; do
+        names+="${names:+, }${_MOD_NAME[i]}"
+    done
+    write_to_log_file "INFO" "Installing in parallel: ${names}"
+
+    prev_int=$(trap -p INT);   prev_term=$(trap -p TERM)
+    trap '_registry_abort_wave INT'  INT
+    trap '_registry_abort_wave TERM' TERM
+
+    start_spinner "Installing ${names}..."
+    for i in "$@"; do
+        id="${_MOD_ID[i]}"
+        (
+            # The child writes its file log to its own buffer; `|| rc=$?` keeps
+            # errexit off inside install_fn, exactly as in the serial path.
+            # The override is deliberately local to this subshell.
+            # shellcheck disable=SC2030
+            LOG_FILE="${dir}/${id}.log"
+            trap - EXIT
+            rc=0
+            "${_MOD_INSTALL_FN[i]}" || rc=$?
+            exit "${rc}"
+        ) >"${dir}/${id}.out" 2>"${dir}/${id}.err" &
+        _REGISTRY_WAVE_PIDS+=("$!")
+    done
+
+    # Poll (bash 3.2 has no `wait -n`) until every job is done or a required
+    # module has failed.
+    while [[ ${remaining} -gt 0 && ${culprit} -lt 0 ]]; do
+        for k in "${!_REGISTRY_WAVE_PIDS[@]}"; do
+            [[ -z "${rcs[k]:-}" ]] || continue
+            _registry_job_done "${_REGISTRY_WAVE_PIDS[k]}" || continue
+            rc=0
+            wait "${_REGISTRY_WAVE_PIDS[k]}" || rc=$?
+            rcs[k]="${rc}"
+            remaining=$(( remaining - 1 ))
+            if [[ ${rc} -ne 0 && ${rc} -ne ${REGISTRY_RC_SKIPPED} \
+                  && "${_MOD_REQUIRED[${mods[k]}]}" == "true" ]]; then
+                culprit=${k}
+                break
+            fi
+        done
+        [[ ${remaining} -gt 0 && ${culprit} -lt 0 ]] && sleep 0.2
+    done
+
+    # Fail-fast: stop the siblings that are still running
+    if [[ ${culprit} -ge 0 ]]; then
+        for k in "${!_REGISTRY_WAVE_PIDS[@]}"; do
+            [[ -z "${rcs[k]:-}" ]] || continue
+            pkill -TERM -P "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
+            kill -TERM "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
+            wait "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
+            rcs[k]="aborted"
+        done
+    fi
+    stop_spinner
+
+    eval "${prev_int:-trap - INT}"
+    eval "${prev_term:-trap - TERM}"
+    _REGISTRY_WAVE_PIDS=()
+
+    # Flush in order, then record outcomes
+    k=0
+    for i in "$@"; do
+        id="${_MOD_ID[i]}"
+        # shellcheck disable=SC2031  # LOG_FILE here is the parent's, not the child's
+        if [[ -n "${LOG_FILE:-}" ]]; then
+            cat "${dir}/${id}.log" >> "${LOG_FILE}" 2>/dev/null || true
+        fi
+        cat "${dir}/${id}.out" 2>/dev/null || true
+        cat "${dir}/${id}.err" >&2 2>/dev/null || true
+        if [[ "${rcs[k]}" == "aborted" ]]; then
+            _MOD_STATUS[i]="skipped"
+            log_warn "${_MOD_NAME[i]} aborted: ${_MOD_NAME[${mods[culprit]}]} failed"
+        else
+            _registry_finish_module "${i}" "${rcs[k]}" || failed=1
+        fi
+        k=$(( k + 1 ))
+    done
+
+    rm -rf "${dir}"
+    _REGISTRY_WAVE_DIR=""
+    [[ ${failed} -eq 0 ]]
+}
+
+################################################################################
 # registry_install_all
 # Installs matching modules wave by wave.  Populates REGISTRY_INSTALLED with the
 # display names of modules that installed successfully.
+#
+# Modules of one wave run concurrently.  A failing required module aborts the
+# installer once its wave has finished; no later wave is started.
 ################################################################################
 registry_install_all() {
     REGISTRY_INSTALLED=()
     _MOD_STATUS=()      # per module: ok | failed | skipped | filtered
-    local i dep d unmet name rc not_applicable=""
+    local i dep d unmet name w max_wave=0 not_applicable=""
+    local batch
 
     # Report non-applicable modules once, up front, so the skips are not
     # interleaved with (and mistaken for part of) another module's output.
@@ -344,48 +522,40 @@ registry_install_all() {
     fi
 
     for i in "${_MOD_ORDER[@]}"; do
-        name="${_MOD_NAME[i]}"
+        [[ ${_MOD_WAVE[i]} -gt ${max_wave} ]] && max_wave=${_MOD_WAVE[i]}
+    done
 
-        [[ "${_MOD_STATUS[i]:-}" == "filtered" ]] && continue
+    for (( w = 1; w <= max_wave; w++ )); do
+        batch=()
 
-        unmet=""
-        for dep in ${_MOD_DEPS[i]}; do
-            d=$(_registry_index_of "${dep}")
-            [[ "${_MOD_STATUS[d]:-}" == "ok" ]] || unmet+="${unmet:+ }${dep}"
+        # Dependencies always live in earlier waves, so their status is final.
+        for i in "${_MOD_ORDER[@]}"; do
+            [[ ${_MOD_WAVE[i]} -eq ${w} ]] || continue
+            [[ "${_MOD_STATUS[i]:-}" == "filtered" ]] && continue
+            name="${_MOD_NAME[i]}"
+
+            unmet=""
+            for dep in ${_MOD_DEPS[i]}; do
+                d=$(_registry_index_of "${dep}")
+                # A dependency that does not apply to this target can never be
+                # installed here, so it is not a reason to skip the dependent.
+                [[ "${_MOD_STATUS[d]:-}" == "filtered" ]] && continue
+                [[ "${_MOD_STATUS[d]:-}" == "ok" ]] || unmet+="${unmet:+ }${dep}"
+            done
+            if [[ -n "${unmet}" ]]; then
+                _MOD_STATUS[i]="skipped"
+                if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
+                    log_error "Cannot install ${name}: dependency not installed (${unmet})"
+                    exit 1
+                fi
+                log_warn "${name} skipped: dependency not installed (${unmet})"
+                continue
+            fi
+            batch+=("${i}")
         done
-        if [[ -n "${unmet}" ]]; then
-            _MOD_STATUS[i]="skipped"
-            if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
-                log_error "Cannot install ${name}: dependency not installed (${unmet})"
-                exit 1
-            fi
-            log_warn "${name} skipped: dependency not installed (${unmet})"
-            continue
-        fi
 
-        start_spinner "Installing ${name}..."
-        rc=0
-        "${_MOD_INSTALL_FN[i]}" || rc=$?
-        if [[ ${rc} -eq ${REGISTRY_RC_SKIPPED} ]]; then
-            # Function ran but deliberately deployed nothing (e.g. images unset):
-            # not a failure, not "installed" — dependents will be skipped.
-            stop_spinner
-            _MOD_STATUS[i]="skipped"
-            write_to_log_file "INFO" "${name}: nothing deployed — skipped"
-        elif [[ ${rc} -ne 0 ]]; then
-            stop_spinner
-            _MOD_STATUS[i]="failed"
-            if [[ "${_MOD_REQUIRED[i]}" == "true" ]]; then
-                log_error "Failed to install ${name}"
-                exit 1
-            fi
-            log_warn "${name} installation skipped or failed"
-        else
-            stop_spinner
-            _MOD_STATUS[i]="ok"
-            log_install_success "${name}"
-            REGISTRY_INSTALLED+=("${name}")
-        fi
+        [[ ${#batch[@]} -eq 0 ]] && continue
+        _registry_run_parallel "${batch[@]}" || exit 1
     done
     return 0
 }

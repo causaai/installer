@@ -214,26 +214,50 @@ delete_namespace() {
 ################################################################################
 # Wait for a deployment to reach ready state
 # Usage: wait_for_deployment <name> <namespace> <timeout_seconds>
+#
+# Fails fast instead of waiting out the whole timeout when a pod of the
+# deployment can never start because its image cannot be pulled
+# (ImagePullBackOff, InvalidImageName, ErrImageNeverPull).
 ################################################################################
 wait_for_deployment() {
     local name="$1"
     local ns="${2:-${INSTALL_NAMESPACE}}"
     local timeout="${3:-300}"
+    local deadline reason image
 
     write_to_log_file "INFO" "Waiting for deployment ${name} in ${ns} (timeout: ${timeout}s)..."
+    deadline=$(( $(date +%s) + timeout ))
 
-    if ! ${KUBE_CLI} wait --for=condition=Available \
-        deployment/"${name}" \
-        -n "${ns}" \
-        --timeout="${timeout}s" >>"${LOG_FILE}" 2>&1; then
-        write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
-        ${KUBE_CLI} get pods -n "${ns}" -l "app=${name}" >>"${LOG_FILE}" 2>&1 || true
-        ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
-        return 1
-    fi
+    while true; do
+        if ${KUBE_CLI} wait --for=condition=Available \
+            deployment/"${name}" \
+            -n "${ns}" \
+            --timeout=5s >>"${LOG_FILE}" 2>&1; then
+            write_to_log_file "SUCCESS" "Deployment ${name} is ready"
+            return 0
+        fi
 
-    write_to_log_file "SUCCESS" "Deployment ${name} is ready"
-    return 0
+        reason=$(${KUBE_CLI} get pods -n "${ns}" -l "app=${name}" \
+            -o jsonpath='{range .items[*].status.containerStatuses[*]}{.state.waiting.reason}{"\n"}{end}' \
+            2>/dev/null | grep -E -m1 '^(ImagePullBackOff|InvalidImageName|ErrImageNeverPull)$' || true)
+        if [[ -n "${reason}" ]]; then
+            image=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+                -o jsonpath='{.spec.template.spec.containers[*].image}' 2>/dev/null || true)
+            log_error "Deployment ${name} cannot start: ${reason} (image: ${image:-unknown}). Check the image name and registry access."
+            break
+        fi
+
+        if [[ $(date +%s) -ge ${deadline} ]]; then
+            log_error "Deployment ${name} did not become ready within ${timeout}s"
+            break
+        fi
+        sleep 2
+    done
+
+    write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
+    ${KUBE_CLI} get pods -n "${ns}" -l "app=${name}" >>"${LOG_FILE}" 2>&1 || true
+    ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
+    return 1
 }
 
 ################################################################################

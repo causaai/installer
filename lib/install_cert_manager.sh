@@ -29,6 +29,8 @@ CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-latest}"
 CERT_MANAGER_NAMESPACE="cert-manager"
 CERT_MANAGER_MANIFEST_URL="https://github.com/cert-manager/cert-manager/releases/${CERT_MANAGER_VERSION}/download/cert-manager.yaml"
 CERT_MANAGER_DEPLOY_TIMEOUT="${CERT_MANAGER_DEPLOY_TIMEOUT:-180}"
+# Seconds to wait for the webhook to accept requests (CA injected) after rollout
+CERT_MANAGER_WEBHOOK_TIMEOUT="${CERT_MANAGER_WEBHOOK_TIMEOUT:-180}"
 # Label applied to the cert-manager namespace when WE install it.
 # Its presence is the signal that uninstall should remove cert-manager.
 _CERT_MANAGER_MANAGED_LABEL="app.kubernetes.io/managed-by=causa-installer"
@@ -44,6 +46,34 @@ _cert_manager_installed() {
     ${KUBE_CLI} get deployment cert-manager          -n "${CERT_MANAGER_NAMESPACE}" &>/dev/null &&
     ${KUBE_CLI} get deployment cert-manager-webhook  -n "${CERT_MANAGER_NAMESPACE}" &>/dev/null &&
     ${KUBE_CLI} get deployment cert-manager-cainjector -n "${CERT_MANAGER_NAMESPACE}" &>/dev/null
+}
+
+################################################################################
+# _wait_cert_manager_webhook
+# Waits until the cert-manager webhook accepts requests, probed by dry-running a
+# minimal Issuer.  A rolled-out webhook is not usable until the cainjector has
+# injected its CA bundle, which can lag behind the rollout (leader election).
+################################################################################
+_wait_cert_manager_webhook() {
+    local probe deadline
+    probe=$(mktemp /tmp/causa-$$-cm-probe-XXXXXX.yaml) || {
+        log_error "mktemp failed — cannot create cert-manager webhook probe file"
+        return 1
+    }
+    printf 'apiVersion: cert-manager.io/v1\nkind: Issuer\nmetadata:\n  name: causa-webhook-probe\n  namespace: %s\nspec:\n  selfSigned: {}\n' \
+        "${CERT_MANAGER_NAMESPACE}" > "${probe}"
+
+    deadline=$(( $(date +%s) + CERT_MANAGER_WEBHOOK_TIMEOUT ))
+    while ! ${KUBE_CLI} apply --dry-run=server -f "${probe}" &>/dev/null; do
+        if [[ $(date +%s) -ge ${deadline} ]]; then
+            rm -f "${probe}"
+            log_error "cert-manager webhook did not accept requests within ${CERT_MANAGER_WEBHOOK_TIMEOUT}s"
+            return 1
+        fi
+        sleep 2
+    done
+    rm -f "${probe}"
+    return 0
 }
 
 ################################################################################
@@ -85,6 +115,7 @@ install_cert_manager() {
     if _cert_manager_installed; then
         write_to_log_file "INFO" "cert-manager is already installed (pre-existing) — skipping install"
         write_to_log_file "INFO" "Pre-existing cert-manager will NOT be removed on --terminate"
+        _wait_cert_manager_webhook || return 1
         write_to_log_file "SUCCESS" "cert-manager already present"
         # Do NOT label — we did not install it, so uninstall must not touch it
         return 0
@@ -118,6 +149,11 @@ install_cert_manager() {
     if ! _label_cert_manager_namespace; then
         write_to_log_file "WARN" "Failed to label cert-manager namespace — uninstall may not remove it automatically"
     fi
+
+    # ── 5. Wait until the webhook accepts requests (CA bundle injected) ──────
+    # After labelling, so a timeout here still leaves cert-manager removable.
+    write_to_log_file "INFO" "Waiting for cert-manager webhook to accept requests..."
+    _wait_cert_manager_webhook || return 1
 
     write_to_log_file "SUCCESS" "cert-manager is ready"
     write_to_log_file "INFO"    "cert-manager version: ${CERT_MANAGER_VERSION}"

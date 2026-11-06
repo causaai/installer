@@ -8,6 +8,9 @@
 if [[ -n "${INSTALL_QUARKUS_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_QUARKUS_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 _quarkus_mcp_not_released() {
     [[ -z "${QUARKUS_MCP_IMAGE:-}" ]]
 }
@@ -79,7 +82,7 @@ install_quarkus_mcp() {
     fi
     rm -f "${tmp}"
 
-    if ! wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" 300; then
+    if ! wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
         log_error "Quarkus MCP did not become ready"
         return 1
     fi
