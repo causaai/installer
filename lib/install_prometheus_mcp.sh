@@ -16,6 +16,9 @@
 if [[ -n "${INSTALL_PROMETHEUS_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_PROMETHEUS_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 ################################################################################
 # _prometheus_mcp_not_released
 # Returns 0 (true) when PROMETHEUS_MCP_SERVER_IMAGE is unset — install is skipped.
@@ -122,7 +125,7 @@ install_prometheus_mcp_server() {
     rm -f "${tmp}"
     write_to_log_file "SUCCESS" "Manifest applied: ${manifest}"
 
-    if ! wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" 300; then
+    if ! wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
         log_error "Prometheus MCP Server did not become ready"
         return 1
     fi

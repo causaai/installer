@@ -21,6 +21,9 @@
 if [[ -n "${INSTALL_CAUSA_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_CAUSA_LIB_LOADED=1
 
+# Seconds to wait for the causa-backend Deployment to become Available
+CAUSA_DEPLOY_TIMEOUT="${CAUSA_DEPLOY_TIMEOUT:-600}"
+
 # ---------------------------------------------------------------------------
 # _causa_mcp_endpoints — compute the three endpoint values for the current
 # install target and namespace.  These are always derived from the cluster's
@@ -185,7 +188,7 @@ install_causa() {
         fi
         apply_manifest "${ocp_dir}/service.yaml" "${INSTALL_NAMESPACE}" || return 1
 
-        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" 600; then
+        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}"; then
             log_error "Causa Backend did not become ready in time"
             return 1
         fi
@@ -230,7 +233,7 @@ install_causa() {
         rm -f "${tmp}"
         write_to_log_file "SUCCESS" "Manifest applied: ${manifest}"
 
-        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" 600; then
+        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}"; then
             log_error "Causa Backend did not become ready in time"
             return 1
         fi

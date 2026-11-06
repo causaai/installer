@@ -15,6 +15,9 @@
 if [[ -n "${INSTALL_CAUSA_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_CAUSA_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 ################################################################################
 # _validate_causa_backend_ready
 # Checks that the Causa Backend deployment exists and is fully available before
@@ -80,7 +83,7 @@ install_causa_mcp() {
         return 1
     fi
 
-    if ! wait_for_deployment "causa-mcp" "${INSTALL_NAMESPACE}" 300; then
+    if ! wait_for_deployment "causa-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
         log_error "Causa MCP did not become ready"
         return 1
     fi
