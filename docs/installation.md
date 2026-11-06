@@ -117,7 +117,7 @@ See [Configuration](configuration.md) for the full reference.
 
 1. Kind cluster + local registry
 2. cert-manager (installed from official release manifest via `kubectl apply -f`)
-3. Registry modules from `modules.json`, in dependency waves (`depends_on`):
+3. Registry modules from `modules.json`, in dependency waves (`depends_on`). Waves run one after another; **the components within a wave are installed concurrently**, so their relative order is not guaranteed (arrows such as Controller → Analyzer → Agent describe one component's internal steps only):
    - Wave 1: Prometheus Stack (kube-prometheus-stack, `monitoring` namespace), Kubernetes MCP Server, Jafra Ecosystem (Controller → Analyzer → Agent) _(skipped if images not set)_, Quarkus MCP Server _(skipped if image not set)_, Prometheus MCP Server _(skipped if image not set)_, PostgreSQL + pgvector
    - Wave 2: Jafra MCP Server _(skipped if image not set, or if Jafra was not deployed)_, Causa _(stamps MCP env vars + waits for rollout)_
    - Wave 3: Causa MCP Server
@@ -125,11 +125,10 @@ See [Configuration](configuration.md) for the full reference.
 ### OpenShift
 
 1. OpenShift User Workload Monitoring enabled + Alertmanager webhook configured
-2. Kubernetes MCP Server + Route
-3. Quarkus MCP Server _(skipped if image not set)_
-4. PostgreSQL via CloudNativePG operator
-5. Causa Backend + Route _(stamps MCP env vars + waits for rollout)_
-6. Causa MCP Server + Route
+2. Registry modules, in dependency waves; the components within a wave are installed concurrently:
+   - Wave 1: Kubernetes MCP Server + Route, Quarkus MCP Server _(skipped if image not set; its Prometheus dependency is Kind-only and is ignored here)_, PostgreSQL via CloudNativePG operator
+   - Wave 2: Causa Backend + Route _(stamps MCP env vars + waits for rollout)_
+   - Wave 3: Causa MCP Server + Route
 
 ## Uninstallation
 
