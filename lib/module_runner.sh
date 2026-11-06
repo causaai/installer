@@ -401,6 +401,10 @@ _registry_job_done() {
 _registry_run_parallel() {
     local i names="" k rc failed=0 dir id prev_int prev_term
     local mods=("$@") remaining=$# culprit=-1
+    # Path of the real log: inside a wave each module's LOG_FILE is a temp file
+    # that is deleted afterwards, so messages must point users here instead.
+    # shellcheck disable=SC2034  # read by module scripts running in the subshells
+    local INSTALL_LOG_FILE="${LOG_FILE:-}"
     _REGISTRY_WAVE_PIDS=()
     local rcs=()
 

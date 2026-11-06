@@ -35,8 +35,45 @@ PROMETHEUS_HELM_REPO_NAME="prometheus-community"
 PROMETHEUS_CHART="${PROMETHEUS_HELM_REPO_NAME}/kube-prometheus-stack"
 # Wait up to 5 minutes for Prometheus Operator + Alertmanager to be ready
 PROMETHEUS_DEPLOY_TIMEOUT="${PROMETHEUS_DEPLOY_TIMEOUT:-300}"
+# Seconds to wait for the Prometheus StatefulSet (created by the operator after
+# helm returns) to exist and become ready
+PROMETHEUS_READY_TIMEOUT="${PROMETHEUS_READY_TIMEOUT:-300}"
 
 export PROMETHEUS_NAMESPACE PROMETHEUS_RELEASE_NAME
+
+################################################################################
+# _wait_prometheus_ready
+# `helm --wait` returns once the operator is up, but the operator creates the
+# Prometheus StatefulSet afterwards.  Wait for it to exist, then to be ready, so
+# modules that query Prometheus can rely on it when this install reports success.
+################################################################################
+_wait_prometheus_ready() {
+    local ns="${PROMETHEUS_NAMESPACE}" sts="" deadline remaining
+    deadline=$(( $(date +%s) + PROMETHEUS_READY_TIMEOUT ))
+
+    write_to_log_file "INFO" "Waiting for the Prometheus StatefulSet to be ready..."
+    while true; do
+        sts=$(${KUBE_CLI} get statefulset -n "${ns}" \
+            -l "app.kubernetes.io/name=prometheus" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        [[ -n "${sts}" ]] && break
+        if [[ $(date +%s) -ge ${deadline} ]]; then
+            log_error "Prometheus StatefulSet was not created within ${PROMETHEUS_READY_TIMEOUT}s"
+            return 1
+        fi
+        sleep 2
+    done
+
+    remaining=$(( deadline - $(date +%s) ))
+    [[ ${remaining} -lt 1 ]] && remaining=1
+    if ! ${KUBE_CLI} rollout status "statefulset/${sts}" -n "${ns}" \
+            --timeout="${remaining}s" >>"${LOG_FILE}" 2>&1; then
+        log_error "Prometheus StatefulSet '${sts}' did not become ready within ${PROMETHEUS_READY_TIMEOUT}s"
+        return 1
+    fi
+    write_to_log_file "SUCCESS" "Prometheus StatefulSet ready: ${sts}"
+    return 0
+}
 
 ################################################################################
 # _causa_alertmanager_webhook_url
@@ -230,6 +267,7 @@ install_prometheus() {
                 >>"${LOG_FILE}" 2>&1; then
             rm -f "${values_file}"
             log_error "helm upgrade failed for kube-prometheus-stack"
+            log_error "Check log for details: ${INSTALL_LOG_FILE:-${LOG_FILE}}"
             return 1
         fi
     else
@@ -242,7 +280,7 @@ install_prometheus() {
                 >>"${LOG_FILE}" 2>&1; then
             rm -f "${values_file}"
             log_error "helm install failed for kube-prometheus-stack"
-            log_error "Check log for details: ${LOG_FILE}"
+            log_error "Check log for details: ${INSTALL_LOG_FILE:-${LOG_FILE}}"
             log_error "Manual retry: helm install ${PROMETHEUS_RELEASE_NAME} ${PROMETHEUS_CHART} --namespace ${PROMETHEUS_NAMESPACE}"
             return 1
         fi
@@ -287,6 +325,9 @@ install_prometheus() {
             write_to_log_file "WARN" "Manifest not found: ${manifest} — skipping"
         fi
     done
+
+    # ── 8. Wait for the Prometheus StatefulSet itself ─────────────────────────
+    _wait_prometheus_ready || return 1
 
     write_to_log_file "SUCCESS" "Prometheus stack installed"
     write_to_log_file "INFO"    "Alertmanager webhook → $(_causa_alertmanager_webhook_url)"
