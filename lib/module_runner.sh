@@ -83,6 +83,7 @@ REGISTRY_HEALTH_LINES=()
 # State of the parallel wave in flight, used by the INT/TERM handler
 _REGISTRY_WAVE_PIDS=()
 _REGISTRY_WAVE_DIR=""
+_REGISTRY_PENDING_SIG=""
 
 ################################################################################
 # _registry_schema_errors FILE
@@ -361,21 +362,55 @@ _registry_finish_module() {
 }
 
 ################################################################################
+# _registry_terminate_job PID
+# Stops one wave job and everything it spawned.  Each job is started with job
+# control enabled, so PID is also its process-group id: signalling the group
+# reaches nested processes that would otherwise outlive the install subshell.
+# Reaps the job, waits for the group to empty, and escalates to SIGKILL if it
+# does not exit within ~10s.
+################################################################################
+_registry_terminate_job() {
+    local pid="$1" n
+    kill -TERM -- "-${pid}" 2>/dev/null || {
+        # No such group (job control unavailable): fall back to the process tree
+        pkill -TERM -P "${pid}" 2>/dev/null || true
+        kill -TERM "${pid}" 2>/dev/null || true
+    }
+    wait "${pid}" 2>/dev/null || true
+    for (( n = 0; n < 100; n++ )); do
+        kill -0 -- "-${pid}" 2>/dev/null || return 0
+        sleep 0.1
+    done
+    kill -KILL -- "-${pid}" 2>/dev/null || true
+    return 0
+}
+
+################################################################################
 # _registry_abort_wave SIGNAL
-# INT/TERM handler while a parallel wave runs: stops the background installs,
-# removes their buffered output and re-raises SIGNAL.  (Without job control,
-# background jobs ignore the terminal's SIGINT, so they must be killed here.)
+# INT/TERM handler while a parallel wave runs: stops the background installs
+# (whole process groups), removes their buffered output and re-raises SIGNAL.
+# (Background jobs do not receive the terminal's SIGINT, so they must be
+# stopped here.)
 ################################################################################
 _registry_abort_wave() {
     local sig="$1" pid
     stop_spinner
-    for pid in "${_REGISTRY_WAVE_PIDS[@]}"; do
-        pkill -TERM -P "${pid}" 2>/dev/null || true
-        kill -TERM "${pid}" 2>/dev/null || true
+    for pid in ${_REGISTRY_WAVE_PIDS[@]+"${_REGISTRY_WAVE_PIDS[@]}"}; do
+        _registry_terminate_job "${pid}"
     done
     [[ -n "${_REGISTRY_WAVE_DIR:-}" ]] && rm -rf "${_REGISTRY_WAVE_DIR}"
     trap - "${sig}"
     kill -s "${sig}" "$$"
+}
+
+################################################################################
+# _registry_defer_signal SIGNAL
+# Temporary INT/TERM handler used while module jobs are being launched: it only
+# records the signal, so a job's PID can never be left unrecorded.  The launch
+# loop acts on it once the PID is in _REGISTRY_WAVE_PIDS.
+################################################################################
+_registry_defer_signal() {
+    _REGISTRY_PENDING_SIG="$1"
 }
 
 ################################################################################
@@ -399,7 +434,7 @@ _registry_job_done() {
 # Returns 1 if a required module failed.
 ################################################################################
 _registry_run_parallel() {
-    local i names="" k rc failed=0 dir id prev_int prev_term
+    local i names="" k rc failed=0 dir id prev_int prev_term had_monitor=0
     local mods=("$@") remaining=$# culprit=-1
     # Path of the real log: inside a wave each module's LOG_FILE is a temp file
     # that is deleted afterwards, so messages must point users here instead.
@@ -420,10 +455,17 @@ _registry_run_parallel() {
     write_to_log_file "INFO" "Installing in parallel: ${names}"
 
     prev_int=$(trap -p INT);   prev_term=$(trap -p TERM)
-    trap '_registry_abort_wave INT'  INT
-    trap '_registry_abort_wave TERM' TERM
+    # While launching, only record a signal; act on it once every launched PID
+    # is recorded (see _registry_defer_signal).
+    _REGISTRY_PENDING_SIG=""
+    trap '_registry_defer_signal INT'  INT
+    trap '_registry_defer_signal TERM' TERM
 
     start_spinner "Installing ${names}..."
+    # Job control gives every module job its own process group (see
+    # _registry_terminate_job); restore the caller's setting afterwards.
+    [[ $- == *m* ]] && had_monitor=1
+    set -m
     for i in "$@"; do
         id="${_MOD_ID[i]}"
         (
@@ -436,9 +478,17 @@ _registry_run_parallel() {
             rc=0
             "${_MOD_INSTALL_FN[i]}" || rc=$?
             exit "${rc}"
-        ) >"${dir}/${id}.out" 2>"${dir}/${id}.err" &
+        ) </dev/null >"${dir}/${id}.out" 2>"${dir}/${id}.err" &
         _REGISTRY_WAVE_PIDS+=("$!")
+        [[ -z "${_REGISTRY_PENDING_SIG}" ]] || break
     done
+    [[ ${had_monitor} -eq 1 ]] || set +m
+
+    trap '_registry_abort_wave INT'  INT
+    trap '_registry_abort_wave TERM' TERM
+    if [[ -n "${_REGISTRY_PENDING_SIG}" ]]; then
+        _registry_abort_wave "${_REGISTRY_PENDING_SIG}"
+    fi
 
     # Poll (bash 3.2 has no `wait -n`) until every job is done or a required
     # module has failed.
@@ -463,9 +513,7 @@ _registry_run_parallel() {
     if [[ ${culprit} -ge 0 ]]; then
         for k in "${!_REGISTRY_WAVE_PIDS[@]}"; do
             [[ -z "${rcs[k]:-}" ]] || continue
-            pkill -TERM -P "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
-            kill -TERM "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
-            wait "${_REGISTRY_WAVE_PIDS[k]}" 2>/dev/null || true
+            _registry_terminate_job "${_REGISTRY_WAVE_PIDS[k]}"
             rcs[k]="aborted"
         done
     fi

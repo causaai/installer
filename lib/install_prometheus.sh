@@ -48,14 +48,24 @@ export PROMETHEUS_NAMESPACE PROMETHEUS_RELEASE_NAME
 # modules that query Prometheus can rely on it when this install reports success.
 ################################################################################
 _wait_prometheus_ready() {
-    local ns="${PROMETHEUS_NAMESPACE}" sts="" deadline remaining
-    deadline=$(( $(date +%s) + PROMETHEUS_READY_TIMEOUT ))
+    local ns="${PROMETHEUS_NAMESPACE}" sts="" cr="" deadline remaining
 
-    write_to_log_file "INFO" "Waiting for the Prometheus StatefulSet to be ready..."
+    validate_timeout "PROMETHEUS_READY_TIMEOUT" "${PROMETHEUS_READY_TIMEOUT}" || return 1
+    deadline=$(( $(date +%s) + 10#${PROMETHEUS_READY_TIMEOUT} ))
+
+    write_to_log_file "INFO" "Waiting for the Prometheus StatefulSet of release ${PROMETHEUS_RELEASE_NAME} to be ready..."
     while true; do
-        sts=$(${KUBE_CLI} get statefulset -n "${ns}" \
-            -l "app.kubernetes.io/name=prometheus" \
+        # Other Prometheus installations may share the namespace: resolve the
+        # Prometheus resource owned by this Helm release, then the StatefulSet
+        # the operator created for it.
+        cr=$(${KUBE_CLI} get prometheus -n "${ns}" \
+            -l "release=${PROMETHEUS_RELEASE_NAME}" \
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        if [[ -n "${cr}" ]]; then
+            sts=$(${KUBE_CLI} get statefulset -n "${ns}" \
+                -l "operator.prometheus.io/name=${cr}" \
+                -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        fi
         [[ -n "${sts}" ]] && break
         if [[ $(date +%s) -ge ${deadline} ]]; then
             log_error "Prometheus StatefulSet was not created within ${PROMETHEUS_READY_TIMEOUT}s"

@@ -56,6 +56,7 @@ _cert_manager_installed() {
 ################################################################################
 _wait_cert_manager_webhook() {
     local probe deadline
+    validate_timeout "CERT_MANAGER_WEBHOOK_TIMEOUT" "${CERT_MANAGER_WEBHOOK_TIMEOUT}" || return 1
     probe=$(mktemp /tmp/causa-$$-cm-probe-XXXXXX.yaml) || {
         log_error "mktemp failed — cannot create cert-manager webhook probe file"
         return 1
@@ -63,7 +64,7 @@ _wait_cert_manager_webhook() {
     printf 'apiVersion: cert-manager.io/v1\nkind: Issuer\nmetadata:\n  name: causa-webhook-probe\n  namespace: %s\nspec:\n  selfSigned: {}\n' \
         "${CERT_MANAGER_NAMESPACE}" > "${probe}"
 
-    deadline=$(( $(date +%s) + CERT_MANAGER_WEBHOOK_TIMEOUT ))
+    deadline=$(( $(date +%s) + 10#${CERT_MANAGER_WEBHOOK_TIMEOUT} ))
     while ! ${KUBE_CLI} apply --dry-run=server -f "${probe}" &>/dev/null; do
         if [[ $(date +%s) -ge ${deadline} ]]; then
             rm -f "${probe}"
