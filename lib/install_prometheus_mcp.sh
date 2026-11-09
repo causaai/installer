@@ -125,10 +125,7 @@ install_prometheus_mcp_server() {
     rm -f "${tmp}"
     write_to_log_file "SUCCESS" "Manifest applied: ${manifest}"
 
-    if ! wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
-        log_error "Prometheus MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Prometheus MCP Server installed"
     write_to_log_file "INFO"    "Internal URL: http://prometheus-mcp-server.${INSTALL_NAMESPACE}.svc.cluster.local:8080"

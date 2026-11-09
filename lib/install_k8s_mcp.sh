@@ -51,10 +51,7 @@ install_kubernetes_mcp_server() {
         return 1
     fi
 
-    if ! wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
-        log_error "Kubernetes MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     # On OpenShift, also apply the Route so the MCP server is externally reachable.
     if _is_openshift_target; then

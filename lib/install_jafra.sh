@@ -119,10 +119,7 @@ install_jafra_controller() {
     fi
 
     # ── 5. Wait for controller to be ready ───────────────────────────────────
-    if ! wait_for_deployment "jafra-controller" "${INSTALL_NAMESPACE}" "${JAFRA_DEPLOY_TIMEOUT}"; then
-        log_error "Controller did not become ready"
-        return 1
-    fi
+    wait_for_deployment "jafra-controller" "${INSTALL_NAMESPACE}" "${JAFRA_DEPLOY_TIMEOUT}" || return 1
     write_to_log_file "SUCCESS" "Controller is ready"
 
     # ── 6. Register MutatingWebhookConfiguration ─────────────────────────────
@@ -166,10 +163,7 @@ install_jafra_analyzer() {
         return 1
     fi
 
-    if ! wait_for_deployment "jafra-analyzer" "${INSTALL_NAMESPACE}" "${JAFRA_DEPLOY_TIMEOUT}"; then
-        log_error "Analyzer did not become ready"
-        return 1
-    fi
+    wait_for_deployment "jafra-analyzer" "${INSTALL_NAMESPACE}" "${JAFRA_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Analyzer is ready"
     write_to_log_file "INFO"    "Analyzer API: kubectl -n ${INSTALL_NAMESPACE} port-forward svc/jafra-analyzer 8080:8080"

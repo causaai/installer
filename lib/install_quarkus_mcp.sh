@@ -82,10 +82,7 @@ install_quarkus_mcp() {
     fi
     rm -f "${tmp}"
 
-    if ! wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
-        log_error "Quarkus MCP did not become ready"
-        return 1
-    fi
+    wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Quarkus MCP Server installed"
 

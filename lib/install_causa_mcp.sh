@@ -83,10 +83,7 @@ install_causa_mcp() {
         return 1
     fi
 
-    if ! wait_for_deployment "causa-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}"; then
-        log_error "Causa MCP did not become ready"
-        return 1
-    fi
+    wait_for_deployment "causa-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     if _is_openshift_target; then
         local route="${SCRIPT_DIR}/manifests/openshift/causa-mcp-route.yaml"

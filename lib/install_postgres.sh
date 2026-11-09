@@ -346,10 +346,7 @@ install_postgres() {
         return 1
     fi
 
-    if ! wait_for_deployment "postgres" "${INSTALL_NAMESPACE}" "${POSTGRES_DEPLOY_TIMEOUT}"; then
-        log_error "Postgres did not become ready in time"
-        return 1
-    fi
+    wait_for_deployment "postgres" "${INSTALL_NAMESPACE}" "${POSTGRES_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "INFO" "Creating ${_PG_SECRET_NAME} secret..."
     ${KUBE_CLI} delete secret "${_PG_SECRET_NAME}" \

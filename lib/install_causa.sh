@@ -188,10 +188,7 @@ install_causa() {
         fi
         apply_manifest "${ocp_dir}/service.yaml" "${INSTALL_NAMESPACE}" || return 1
 
-        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}"; then
-            log_error "Causa Backend did not become ready in time"
-            return 1
-        fi
+        wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}" || return 1
 
          # Stamp the three MCP endpoint env vars and wait for the triggered rollout
         if ! _set_causa_env_vars; then
@@ -233,10 +230,7 @@ install_causa() {
         rm -f "${tmp}"
         write_to_log_file "SUCCESS" "Manifest applied: ${manifest}"
 
-        if ! wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}"; then
-            log_error "Causa Backend did not become ready in time"
-            return 1
-        fi
+        wait_for_deployment "causa-backend" "${INSTALL_NAMESPACE}" "${CAUSA_DEPLOY_TIMEOUT}" || return 1
 
         # Stamp the three MCP endpoint env vars and wait for the triggered rollout
         if ! _set_causa_env_vars; then
