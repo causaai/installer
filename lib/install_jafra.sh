@@ -21,37 +21,6 @@ readonly INSTALL_JAFRA_LIB_LOADED=1
 JAFRA_DEPLOY_TIMEOUT="${JAFRA_DEPLOY_TIMEOUT:-180}"
 
 ################################################################################
-# _cert_manager_ready
-# Returns 0 if cert-manager's deployments are ready and its webhook accepts a
-# dry-run Issuer after CA bundle injection; returns 1 if the namespace is
-# missing, any deployment fails to become ready, or the probe fails all retries
-################################################################################
-_cert_manager_ready() {
-    ${KUBE_CLI} get namespace cert-manager &>/dev/null || return 1
-    ${KUBE_CLI} rollout status deployment/cert-manager         -n cert-manager --timeout=30s &>/dev/null || return 1
-    ${KUBE_CLI} rollout status deployment/cert-manager-webhook -n cert-manager --timeout=30s &>/dev/null || return 1
-    ${KUBE_CLI} rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=30s &>/dev/null || return 1
-
-    # Probe the webhook by dry-running a minimal Issuer until the CA bundle is
-    # injected and the webhook accepts requests.
-    local probe; probe=$(mktemp /tmp/causa-$$-cm-probe-XXXXXX.yaml) || {
-        log_error "mktemp failed — cannot create cert-manager webhook probe file"
-        return 1
-    }
-    printf 'apiVersion: cert-manager.io/v1\nkind: Issuer\nmetadata:\n  name: causa-webhook-probe\n  namespace: cert-manager\nspec:\n  selfSigned: {}\n' > "${probe}"
-    local attempt
-    for attempt in $(seq 1 30); do
-        if ${KUBE_CLI} apply --dry-run=server -f "${probe}" &>/dev/null; then
-            rm -f "${probe}"
-            return 0
-        fi
-        sleep 2
-    done
-    rm -f "${probe}"
-    return 1
-}
-
-################################################################################
 # _wait_for_certificate
 # Waits for a cert-manager Certificate resource to reach Ready condition
 ################################################################################
@@ -275,13 +244,14 @@ install_jafra() {
         return 2   # nothing deployed: module runner must not treat Jafra as installed
     fi
 
-    write_to_log_file "INFO" "Waiting for cert-manager webhook to be ready..."
-    if ! _cert_manager_ready; then
-        log_error "cert-manager is not installed or not ready"
+    # cert-manager is a prerequisite: install.sh runs install_cert_manager
+    # (which waits for the webhook) before any module wave starts.  Fail with a
+    # clear message if it is missing rather than at the Certificate apply.
+    if ! _cert_manager_installed; then
+        log_error "cert-manager is not installed"
         log_error "Jafra controller requires cert-manager for webhook TLS certificates"
         return 1
     fi
-    write_to_log_file "SUCCESS" "cert-manager webhook is ready"
 
     if ! create_namespace; then return 1; fi
 

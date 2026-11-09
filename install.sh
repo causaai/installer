@@ -286,7 +286,7 @@ main() {
         start_spinner "Installing cert-manager..."
         if ! install_cert_manager; then
             stop_spinner
-            log_error "Failed to install cert-manager"
+            log_error "cert-manager setup failed"
             exit 1
         fi
         stop_spinner

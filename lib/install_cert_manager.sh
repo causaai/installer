@@ -116,7 +116,10 @@ install_cert_manager() {
     if _cert_manager_installed; then
         write_to_log_file "INFO" "cert-manager is already installed (pre-existing) — skipping install"
         write_to_log_file "INFO" "Pre-existing cert-manager will NOT be removed on --terminate"
-        _wait_cert_manager_webhook || return 1
+        if ! _wait_cert_manager_webhook; then
+            log_error "Existing cert-manager webhook is not ready (check the pods in namespace ${CERT_MANAGER_NAMESPACE})"
+            return 1
+        fi
         write_to_log_file "SUCCESS" "cert-manager already present"
         # Do NOT label — we did not install it, so uninstall must not touch it
         return 0
