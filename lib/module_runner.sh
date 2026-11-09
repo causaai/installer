@@ -44,7 +44,7 @@
 #
 # Not described by the registry (intentionally):
 #   - manifest paths  (owned by each module's source_lib)
-#   - image variables (owned by lib/images.env and lib/validator.sh)
+#   - image variables (owned by lib/images.env; see lib/images.sh)
 #   - Kind cluster, cert-manager and OpenShift monitoring (owned by install.sh)
 #
 # Requires: jq, bash 3.2+ (no associative arrays), logging.sh helpers.

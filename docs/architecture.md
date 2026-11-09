@@ -10,7 +10,8 @@ The installer is a modular Bash project. A single entry point orchestrates the d
 ```
 install.sh                              ← entry point, orchestrates everything
 lib/
-  images.env                            ← default image tags, sourced at startup
+  images.env                            ← default image tags — the only place images are declared
+  images.sh                             ← derives vars, flags, --help and validation from images.env
   logging.sh                            ← logging utilities and spinner
   install_utils.sh                      ← shared helpers, exit codes, error handling
   validator.sh                          ← pre-flight checks (tools, container runtime, cluster)
@@ -68,7 +69,15 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 - **Health checks:** nothing is declared in `modules.json`. After the install, `post_component_validation` calls `registry_check_health`, which looks for a function named `<id>_health` (for example `k8s_mcp_health`, `postgres_health`) defined by the module's own `source_lib`. Exit `0` means healthy; anything printed to stdout is shown as the failure detail. A module without one is not checked, a module whose install was skipped or failed is reported as "not installed", and modules not applicable to the target are omitted. `check_deployment_healthy <deployment>` in `lib/install_utils.sh` covers the common case of a plain Deployment. The check is skipped on `--dry-run`, since nothing is deployed.
 - **Skipped installs:** an `install_fn` that deliberately deploys nothing (for example, its image is unset) returns exit status `2`. The runner does not log it as installed or list it in the summary, and its dependents are skipped. Exit `0` means deployed (or a dry run); any other non-zero status is a failure.
 - **Validation:** `modules.json` is validated before any cluster work (JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, missing `source_lib` / functions).
-- **Not in the registry:** manifest paths and image variables stay in each `source_lib`, `lib/images.env` and `lib/validator.sh`. Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.
+- **Not in the registry:** manifest paths stay in each `source_lib`; image variables live only in `lib/images.env` (see [Image resolution](#image-resolution)). Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.
+
+### Adding a new component
+
+1. **Script:** create `lib/install_<name>.sh` defining the install and uninstall functions (and optionally `<id>_health`), plus its `manifests/<name>/`.
+2. **Registry:** add one entry to `modules.json` (`id`, `source_lib`, `install_fn`, `uninstall_fn`, `targets`, `required`, `depends_on`).
+3. **Image (if any):** add one entry to `lib/images.env` — see below.
+
+`install.sh` and `lib/validator.sh` are not edited.
 
 
 ## Target-specific behaviour
@@ -98,6 +107,26 @@ CLI flag  >  exported env var  >  lib/images.env
 ```
 
 `lib/images.env` uses `${VAR:-value}` syntax, so any value already exported in the environment before the script runs is preserved. There are no hardcoded image fallbacks in the component scripts — `lib/images.env` is the single source of truth.
+
+### Adding or changing an image
+
+Edit only `lib/images.env`:
+
+```bash
+# Widget Service
+WIDGET_SERVICE_IMAGE=${WIDGET_SERVICE_IMAGE:-quay.io/org/widget:1.0.0}
+```
+
+[`lib/images.sh`](../lib/images.sh) discovers every `^[A-Z][A-Z0-9_]*_IMAGE=` line and derives the rest:
+
+| Derived | From | Example |
+|---|---|---|
+| CLI flag | variable name, lowercased with `-` | `--widget-service-image` |
+| `--help` text | comment on the line above (text from ` (` onwards dropped) | `Override Widget Service image` |
+| Override sentinel | variable name | `WIDGET_SERVICE_IMAGE_OVERRIDDEN` |
+| Format validation | every discovered variable | `validate_image_overrides` |
+
+To change a default tag, edit the value in `lib/images.env`. The component script reads `${WIDGET_SERVICE_IMAGE}` directly.
 
 ## Container runtime detection (kind only)
 

@@ -279,32 +279,24 @@ validate_image_format() {
 
 ################################################################################
 # validate_image_overrides
-# Validates all image variables (whether from images.env or CLI override).
+# Validates every image variable discovered from lib/images.env (see
+# lib/images.sh), whether its value came from images.env, the environment or a
+# CLI override.  No image is named here: a new image added to images.env is
+# validated automatically.
 ################################################################################
 validate_image_overrides() {
-    local failed=false
+    local failed=false i var overridden
 
-    _vi() {
-        local img="$1" flag="$2" overridden="$3"
-        [[ -z "${img}" ]] && return 0
-        if [[ "${overridden}" == "true" ]]; then
-            validate_image_format "${img}" "${flag}" || failed=true
+    for i in "${!IMAGE_VARS[@]}"; do
+        var="${IMAGE_VARS[i]}"
+        [[ -z "${!var:-}" ]] && continue
+        overridden="${var}_OVERRIDDEN"
+        if [[ "${!overridden:-false}" == "true" ]]; then
+            validate_image_format "${!var}" "${IMAGE_FLAGS[i]}" || failed=true
         else
-            validate_image_format_silent "${img}" "${flag}" || failed=true
+            validate_image_format_silent "${!var}" "${IMAGE_FLAGS[i]}" || failed=true
         fi
-    }
-
-    _vi "${K8S_MCP_SERVER_IMAGE}"          "--k8s-mcp-server-image"       "${K8S_MCP_SERVER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_MCP_IMAGE}"               "--jafra-mcp-image"            "${JAFRA_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${CAUSA_BACKEND_IMAGE}"           "--causa-backend-image"        "${CAUSA_BACKEND_IMAGE_OVERRIDDEN:-false}"
-    _vi "${QUARKUS_MCP_IMAGE}"             "--quarkus-mcp-image"          "${QUARKUS_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${PROMETHEUS_MCP_SERVER_IMAGE}"   "--prometheus-mcp-server-image" "${PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${CAUSA_MCP_IMAGE}"               "--causa-mcp-image"            "${CAUSA_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_CONTROLLER_IMAGE}"        "--jafra-controller-image"     "${JAFRA_CONTROLLER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_ANALYZER_IMAGE}"          "--jafra-analyzer-image"       "${JAFRA_ANALYZER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_AGENT_IMAGE}"             "--jafra-agent-image"          "${JAFRA_AGENT_IMAGE_OVERRIDDEN:-false}"
-    _vi "${POSTGRES_KIND_IMAGE}"           "--postgres-kind-image"        "${POSTGRES_KIND_IMAGE_OVERRIDDEN:-false}"
-    _vi "${POSTGRES_OCP_IMAGE}"            "--postgres-ocp-image"         "${POSTGRES_OCP_IMAGE_OVERRIDDEN:-false}"
+    done
 
     if [[ "${failed}" == "true" ]]; then
         log_error "Image validation failed. Correct the image format and retry."
