@@ -78,8 +78,12 @@ images_load() {
         return 1
     fi
 
-    # shellcheck source=lib/images.env
-    source "${file}"
+    # Read a single snapshot into memory so sourced values and discovered
+    # declarations always come from the exact same contents.
+    local content
+    content=$(<"${file}")
+
+    eval "${content}"
 
     local line var desc="" flag
     while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -104,7 +108,7 @@ images_load() {
             export "${var}" "${var}_OVERRIDDEN"
         fi
         desc=""
-    done < "${file}"
+    done <<< "${content}"
 
     if [[ ${#IMAGE_VARS[@]} -eq 0 ]]; then
         if declare -F log_error >/dev/null 2>&1; then
