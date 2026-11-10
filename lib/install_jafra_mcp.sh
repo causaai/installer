@@ -10,6 +10,9 @@
 if [[ -n "${INSTALL_JAFRA_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_JAFRA_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 _jafra_mcp_not_released() {
     [[ -z "${JAFRA_MCP_IMAGE:-}" ]]
 }
@@ -49,10 +52,7 @@ install_jafra_mcp() {
         return 1
     fi
 
-    if ! wait_for_deployment "jafra-mcp" "${INSTALL_NAMESPACE}" 300; then
-        log_error "Jafra MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "jafra-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Jafra MCP Server installed"
     write_to_log_file "INFO" "NodePort: localhost:30003"

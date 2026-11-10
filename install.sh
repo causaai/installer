@@ -207,11 +207,14 @@ main() {
         exit 1
     fi
 
-    # OpenShift pre-req: cert-manager must be present before any component runs.
-    # Placed here — after validate_prerequisites confirms oc/kubectl is available
-    # but before any cluster-side work — so a missing cert-manager is caught as
-    # early as possible in the validation section.
+    # OpenShift: the cluster already exists, so verify access (logged in, API
+    # reachable) first, then check that cert-manager is present before any
+    # component runs. (Kind validates access after the cluster is provisioned.)
     if _is_openshift_target; then
+        if ! validate_cluster_access; then
+            log_error "Cluster access check failed"
+            exit 1
+        fi
         if ! validate_cert_manager_with_prompt; then
             log_error "cert-manager pre-req check failed"
             exit 1
@@ -256,9 +259,10 @@ main() {
         installed_components+=("Kind Cluster (${KIND_CLUSTER_NAME})")
     fi
 
-    # After cluster is ready, validate connectivity
-    # Skip for dry-run on kind target — the cluster doesn't exist yet
-    if [[ "${DRY_RUN}" != "true" ]] || ! _is_kind_target; then
+    # Kind: validate connectivity once the cluster has been provisioned
+    # (OpenShift already validated cluster access in the pre-flight section).
+    # Skip for dry-run — the cluster doesn't exist yet.
+    if _is_kind_target && [[ "${DRY_RUN}" != "true" ]]; then
         if ! validate_cluster_access; then
             log_error "Cluster access check failed"
             exit 1
@@ -282,7 +286,7 @@ main() {
         start_spinner "Installing cert-manager..."
         if ! install_cert_manager; then
             stop_spinner
-            log_error "Failed to install cert-manager"
+            log_error "cert-manager setup failed"
             exit 1
         fi
         stop_spinner

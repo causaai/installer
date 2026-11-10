@@ -212,28 +212,107 @@ delete_namespace() {
 }
 
 ################################################################################
+# Validate a timeout value before it is used in shell arithmetic.
+# Usage: validate_timeout <label> <value>
+#
+# Timeouts come from environment variables.  Bash evaluates variable contents
+# recursively inside $(( )), so a crafted value could execute commands.  Only a
+# decimal integer of 1-5 digits (1..99999 seconds) is accepted; callers must
+# then use it as $(( 10#${value} )) so leading zeros are not read as octal.
+################################################################################
+validate_timeout() {
+    local label="$1" value="$2"
+    if [[ "${value}" =~ ^[0-9]{1,5}$ ]] && (( 10#${value} >= 1 )); then
+        return 0
+    fi
+    log_error "Invalid ${label}: must be a whole number of seconds between 1 and 99999"
+    return 1
+}
+
+################################################################################
 # Wait for a deployment to reach ready state
 # Usage: wait_for_deployment <name> <namespace> <timeout_seconds>
+#
+# Fails fast instead of waiting out the whole timeout when a pod of the
+# deployment can never start because its image cannot be pulled.
+#   - InvalidImageName / ErrImageNeverPull fail immediately (they cannot recover).
+#   - ImagePullBackOff / ErrImagePull can be transient (slow registry, local
+#     registry not ready) and Kubernetes retries them, so they only fail once
+#     they have persisted for IMAGE_PULL_BACKOFF_GRACE seconds (default 60).
+#     The timer resets when no pod is failing to pull any more.
 ################################################################################
 wait_for_deployment() {
     local name="$1"
     local ns="${2:-${INSTALL_NAMESPACE}}"
     local timeout="${3:-300}"
+    local grace="${IMAGE_PULL_BACKOFF_GRACE:-60}"
+    local deadline reason reasons image sel now backoff_since=0
+    # Manifests label pods either `app=<name>` or `app.kubernetes.io/name=<name>`
+    local selectors=("app=${name}" "app.kubernetes.io/name=${name}")
+
+    validate_timeout "timeout for deployment ${name}" "${timeout}" || return 1
+    validate_timeout "IMAGE_PULL_BACKOFF_GRACE" "${grace}" || return 1
 
     write_to_log_file "INFO" "Waiting for deployment ${name} in ${ns} (timeout: ${timeout}s)..."
+    deadline=$(( $(date +%s) + 10#${timeout} ))
 
-    if ! ${KUBE_CLI} wait --for=condition=Available \
-        deployment/"${name}" \
-        -n "${ns}" \
-        --timeout="${timeout}s" >>"${LOG_FILE}" 2>&1; then
-        write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
-        ${KUBE_CLI} get pods -n "${ns}" -l "app=${name}" >>"${LOG_FILE}" 2>&1 || true
-        ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
-        return 1
-    fi
+    while true; do
+        if ${KUBE_CLI} wait --for=condition=Available \
+            deployment/"${name}" \
+            -n "${ns}" \
+            --timeout=5s >>"${LOG_FILE}" 2>&1; then
+            write_to_log_file "SUCCESS" "Deployment ${name} is ready"
+            return 0
+        fi
 
-    write_to_log_file "SUCCESS" "Deployment ${name} is ready"
-    return 0
+        reasons=""
+        for sel in "${selectors[@]}"; do
+            reasons+=$(${KUBE_CLI} get pods -n "${ns}" -l "${sel}" \
+                -o jsonpath='{range .items[*].status.containerStatuses[*]}{.state.waiting.reason}{"\n"}{end}' \
+                2>/dev/null || true)
+            reasons+=$'\n'
+        done
+
+        now=$(date +%s)
+        reason=""
+        if [[ "${reasons}" =~ (InvalidImageName|ErrImageNeverPull) ]]; then
+            # Cannot recover: fail immediately
+            reason="${BASH_REMATCH[1]}"
+        elif [[ "${reasons}" == *ImagePullBackOff* || "${reasons}" == *ErrImagePull* ]]; then
+            # Kubernetes alternates a failing pod between ErrImagePull and
+            # ImagePullBackOff, so both count as one ongoing pull failure.
+            if (( backoff_since == 0 )); then
+                backoff_since=${now}
+                write_to_log_file "WARN" "Deployment ${name}: image pull failing, allowing ${grace}s for recovery"
+            fi
+            if (( now - backoff_since >= 10#${grace} )); then
+                reason="ImagePullBackOff"
+            fi
+        else
+            # No pull failure: reset the grace timer
+            backoff_since=0
+        fi
+
+        if [[ -n "${reason}" ]]; then
+            image=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+                -o jsonpath='{.spec.template.spec.containers[*].image}' 2>/dev/null || true)
+            log_error "Deployment ${name} cannot start: ${reason} (image: ${image:-unknown}). Check the image name and registry access."
+            break
+        fi
+
+        if [[ ${now} -ge ${deadline} ]]; then
+            log_error "Deployment ${name} did not become ready within ${timeout}s"
+            break
+        fi
+        sleep 2
+    done
+
+    write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
+    for sel in "${selectors[@]}"; do
+        ${KUBE_CLI} get pods -n "${ns}" -l "${sel}" >>"${LOG_FILE}" 2>&1 || true
+    done
+    ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
+    return 1
 }
 
 ################################################################################

@@ -51,6 +51,21 @@ The following two endpoints are derived automatically from `INSTALL_NAMESPACE` a
 | `CAUSA_MCP_ASYNC_PROFILER_ENDPOINT` | `http://jafra-mcp.<namespace>.svc.cluster.local:8083` |
 | `JAFRA_ANALYZER_URL` | `http://jafra-analyzer.<namespace>.svc.cluster.local:8080` |
 
+### Wait timeouts
+
+Each component waits for its workload to become ready before the installer moves on. All values are in seconds and must be whole numbers from `1` to `99999`; any other value (non-numeric, zero, negative, or more than five digits) is rejected and the wait fails with an error. Set them as environment variables before running `install.sh`.
+
+| Variable | Default | Applies to |
+|---|---|---|
+| `CAUSA_DEPLOY_TIMEOUT` | `600` | Causa Backend Deployment to become Available |
+| `MCP_DEPLOY_TIMEOUT` | `300` | Deployment of each MCP server: Causa MCP, Kubernetes MCP, Quarkus MCP, Prometheus MCP and Jafra MCP (one value shared by all five) |
+| `JAFRA_DEPLOY_TIMEOUT` | `180` | Jafra Controller and Jafra Analyzer Deployments (Kind only) |
+| `POSTGRES_DEPLOY_TIMEOUT` | `180` | PostgreSQL Deployment (Kind) |
+| `PROMETHEUS_DEPLOY_TIMEOUT` | `300` | `helm install` / `helm upgrade` of kube-prometheus-stack (Kind only) |
+| `PROMETHEUS_READY_TIMEOUT` | `300` | Prometheus StatefulSet of the kube-prometheus-stack release to be created and ready, after Helm returns (Kind only) |
+| `CERT_MANAGER_DEPLOY_TIMEOUT` | `180` | cert-manager Deployments to roll out (Kind only) |
+| `CERT_MANAGER_WEBHOOK_TIMEOUT` | `180` | cert-manager webhook to accept requests after rollout (Kind only) |
+
 ## Image overrides
 
 Default images are defined in [`lib/images.env`](../lib/images.env) — the single source of truth for all image defaults.
