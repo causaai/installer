@@ -63,7 +63,6 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 | `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
 | `depends_on` | Module ids that must be installed first |
 
-<<<<<<< Updated upstream
 - **Waves:** a module runs in a later wave than all of its dependencies. Modules in the same wave run **concurrently**, each in its own process group; a wave finishes when all of its modules have finished, and the next wave starts only then. Each module's output is buffered and printed in `modules.json` order once the wave ends, so it is never interleaved. If a `required` module fails, the still-running modules of that wave are terminated (including any processes they spawned) and no later wave starts. Ctrl-C / `SIGTERM` terminates the whole wave the same way. Modules must therefore not rely on a sibling in the same wave having run first — declare such a need with `depends_on`. Uninstall runs sequentially in reverse order.
 - **Dependency not installed:** a dependent of a failed or skipped module is skipped with a warning — or aborts the installer if the dependent is `required`.
 - **Dependency filtered out by target:** a dependency whose `targets` do not include the selected target can never be installed there, so it is ignored and does not block its dependents. For example, `quarkus_mcp` depends on `prometheus` (Kind only); on OpenShift, where Prometheus is the built-in monitoring stack, `quarkus_mcp` still installs. Likewise `jafra_mcp` (depends on `jafra`) and `prometheus_mcp` are Kind-only themselves, so they are filtered out on OpenShift.
@@ -80,7 +79,6 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 
 `install.sh` and `lib/validator.sh` are not edited.
 
-=======
 ### Wave architecture
 
 Two files describe the whole installation:
@@ -124,7 +122,6 @@ Arrows point from a dependency to the module that depends on it.
 ### Adding a new component
 
 Add the manifests, a `lib/install_<name>.sh`, one entry in `modules.json` and, if the component has an image, one entry in `lib/images.env`. `install.sh` and `lib/validator.sh` are not edited. If Causa should call the new MCP server, also register it in the two `mcp.json` files. See [Adding a new component](adding-a-component.md) for the steps, an example and a checklist.
->>>>>>> Stashed changes
 
 ## Target-specific behaviour
 
