@@ -88,7 +88,7 @@
       "install_fn": "install_causa_mcp",
       "uninstall_fn": "uninstall_causa_mcp",
       "targets": ["*"],
-      "required": false,
+      "required": true,
       "depends_on": ["causa_backend"]
     }
   ]
