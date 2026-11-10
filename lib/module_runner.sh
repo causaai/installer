@@ -23,7 +23,8 @@
 #   depends_on  a module runs in a later wave than its dependencies.  If one was
 #               not installed (failed or skipped) the dependent is skipped with a
 #               warning, or aborts the install if it is required.  Dependencies
-#               not applicable to INSTALL_TARGET are ignored.
+#               not applicable to INSTALL_TARGET are ignored, including when
+#               waves are computed: waves are per target.
 #   parallel    modules in a wave install concurrently, one subshell each; their
 #               log output is buffered and appended to LOG_FILE after the wave,
 #               in modules.json order.  Fail-fast: when a required module fails,
@@ -164,6 +165,15 @@ _registry_matches_target() {
 ################################################################################
 # _registry_compute_waves
 # Assigns _MOD_WAVE and _MOD_ORDER.  Returns 1 on unknown dependencies or cycles.
+#
+# Waves are computed in two passes over the dependency graph:
+#   all     every dependency counts.  Only used to reject cycles, so a registry
+#           that is invalid on one target is invalid on every target.
+#   target  a dependency that does not apply to INSTALL_TARGET is ignored: it
+#           can never be installed there, so it must not push its dependents
+#           into a later wave.  These are the waves that are used.
+#           Example: quarkus_mcp depends on prometheus (kind only), so it is in
+#           wave 2 on kind and in wave 1 on openshift.
 ################################################################################
 _registry_compute_waves() {
     local n=${#_MOD_ID[@]} i dep d
@@ -171,7 +181,6 @@ _registry_compute_waves() {
     # Unknown dependencies
     local bad=false
     for (( i = 0; i < n; i++ )); do
-        _MOD_WAVE[i]=0
         for dep in ${_MOD_DEPS[i]}; do
             if ! _registry_index_of "${dep}" >/dev/null; then
                 log_error "modules.json: module '${_MOD_ID[i]}' depends on unknown module '${dep}'"
@@ -181,38 +190,46 @@ _registry_compute_waves() {
     done
     [[ "${bad}" == "true" ]] && return 1
 
-    # Level assignment: wave = 1 + max(wave of dependencies)
-    local progress=true max_dep ready
-    while [[ "${progress}" == "true" ]]; do
-        progress=false
-        for (( i = 0; i < n; i++ )); do
-            [[ ${_MOD_WAVE[i]} -ne 0 ]] && continue
-            ready=true
-            max_dep=0
-            for dep in ${_MOD_DEPS[i]}; do
-                d=$(_registry_index_of "${dep}")
-                if [[ ${_MOD_WAVE[d]} -eq 0 ]]; then
-                    ready=false
-                    break
-                fi
-                [[ ${_MOD_WAVE[d]} -gt ${max_dep} ]] && max_dep=${_MOD_WAVE[d]}
-            done
-            if [[ "${ready}" == "true" ]]; then
-                _MOD_WAVE[i]=$(( max_dep + 1 ))
-                progress=true
-            fi
-        done
-    done
+    local pass progress max_dep ready cyclic
+    for pass in all target; do
+        for (( i = 0; i < n; i++ )); do _MOD_WAVE[i]=0; done
 
-    # Anything still unassigned is part of (or behind) a cycle
-    local cyclic=()
-    for (( i = 0; i < n; i++ )); do
-        [[ ${_MOD_WAVE[i]} -eq 0 ]] && cyclic+=("${_MOD_ID[i]}")
+        # Level assignment: wave = 1 + max(wave of counted dependencies)
+        progress=true
+        while [[ "${progress}" == "true" ]]; do
+            progress=false
+            for (( i = 0; i < n; i++ )); do
+                [[ ${_MOD_WAVE[i]} -ne 0 ]] && continue
+                ready=true
+                max_dep=0
+                for dep in ${_MOD_DEPS[i]}; do
+                    d=$(_registry_index_of "${dep}")
+                    if [[ "${pass}" == "target" ]] && ! _registry_matches_target "${d}"; then
+                        continue
+                    fi
+                    if [[ ${_MOD_WAVE[d]} -eq 0 ]]; then
+                        ready=false
+                        break
+                    fi
+                    [[ ${_MOD_WAVE[d]} -gt ${max_dep} ]] && max_dep=${_MOD_WAVE[d]}
+                done
+                if [[ "${ready}" == "true" ]]; then
+                    _MOD_WAVE[i]=$(( max_dep + 1 ))
+                    progress=true
+                fi
+            done
+        done
+
+        # Anything still unassigned is part of (or behind) a cycle
+        cyclic=()
+        for (( i = 0; i < n; i++ )); do
+            [[ ${_MOD_WAVE[i]} -eq 0 ]] && cyclic+=("${_MOD_ID[i]}")
+        done
+        if [[ ${#cyclic[@]} -gt 0 ]]; then
+            log_error "modules.json: dependency cycle involving: ${cyclic[*]}"
+            return 1
+        fi
     done
-    if [[ ${#cyclic[@]} -gt 0 ]]; then
-        log_error "modules.json: dependency cycle involving: ${cyclic[*]}"
-        return 1
-    fi
 
     # Execution order: by wave, then by position in modules.json
     local w max_wave=0
