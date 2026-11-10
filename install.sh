@@ -27,16 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR
 
 # ---------------------------------------------------------------------------
-# Source images.env FIRST — defines image defaults; can be overridden by
-# CLI flags or exported env vars (priority: CLI > export > images.env)
-# ---------------------------------------------------------------------------
-IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
-if [[ -f "${IMAGES_ENV_FILE}" ]]; then
-    # shellcheck source=lib/images.env
-    source "${IMAGES_ENV_FILE}"
-fi
-
-# ---------------------------------------------------------------------------
 # Global configuration defaults
 # ---------------------------------------------------------------------------
 MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
@@ -85,11 +75,6 @@ export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 CAUSA_MCP_QUARKUS_METRICS_BASE_URL="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
 export CAUSA_MCP_QUARKUS_METRICS_BASE_URL
 
-# Image variables, their <VAR>_OVERRIDDEN sentinels and CLI flags are all
-# derived from lib/images.env (see lib/images.sh) — nothing is listed here.
-source "${SCRIPT_DIR}/lib/images.sh"
-images_load "${IMAGES_ENV_FILE}"
-
 # ---------------------------------------------------------------------------
 # Source library files
 # ---------------------------------------------------------------------------
@@ -97,11 +82,21 @@ images_load "${IMAGES_ENV_FILE}"
 # sourced here — they are declared in modules.json and sourced by registry_load.
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/install_utils.sh"
+source "${SCRIPT_DIR}/lib/images.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/module_runner.sh"
+
+# ---------------------------------------------------------------------------
+# Image variables, their <VAR>_OVERRIDDEN sentinels and CLI flags are all
+# derived from lib/images.env (see lib/images.sh) — nothing is listed here.
+# ---------------------------------------------------------------------------
+IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
+if ! images_load "${IMAGES_ENV_FILE}"; then
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Activate opt-in traps (scoped here, not in shared libraries)

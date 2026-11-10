@@ -52,18 +52,34 @@ images_flag_for_var() {
 
 ################################################################################
 # images_load [FILE]
-# Discovers image variables from FILE (default lib/images.env).  The file itself
-# is sourced by install.sh before this runs, so values from the environment or
-# the file are already in place; this only registers the names and makes sure
-# every variable and its sentinel exist and are exported.
+# Discovers and sources image variables from FILE (default lib/images.env).
+# Initialises and exports every variable and its sentinel (<VAR>_OVERRIDDEN=false).
+# Returns 1 if FILE does not exist.
 ################################################################################
 images_load() {
     local file="${1:-${SCRIPT_DIR}/lib/images.env}"
     IMAGE_VARS=(); IMAGE_FLAGS=(); IMAGE_DESCS=()
 
     if [[ ! -f "${file}" ]]; then
-        return 0
+        if declare -F log_error >/dev/null 2>&1; then
+            log_error "Images configuration file not found: ${file}"
+        else
+            echo "ERROR: Images configuration file not found: ${file}" >&2
+        fi
+        return 1
     fi
+
+    if [[ ! -s "${file}" ]]; then
+        if declare -F log_error >/dev/null 2>&1; then
+            log_error "Images configuration file is empty: ${file}"
+        else
+            echo "ERROR: Images configuration file is empty: ${file}" >&2
+        fi
+        return 1
+    fi
+
+    # shellcheck source=lib/images.env
+    source "${file}"
 
     local line var desc="" flag
     while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -89,6 +105,16 @@ images_load() {
         fi
         desc=""
     done < "${file}"
+
+    if [[ ${#IMAGE_VARS[@]} -eq 0 ]]; then
+        if declare -F log_error >/dev/null 2>&1; then
+            log_error "No image variables declared in: ${file}"
+        else
+            echo "ERROR: No image variables declared in: ${file}" >&2
+        fi
+        return 1
+    fi
+
     return 0
 }
 
