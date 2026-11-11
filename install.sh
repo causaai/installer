@@ -409,6 +409,7 @@ show_usage() {
     echo "    --target TARGET               Target platform (default: kind)"
     echo "                                    kind       — provisions a local Kind cluster"
     echo "                                    openshift  — deploys into an existing OpenShift cluster"
+    echo "                                    vm         — deploys onto a virtual machine"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
     echo "    --delete-cluster              Also delete the Kind cluster when terminating"
@@ -465,9 +466,9 @@ parse_arguments() {
             --target)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --target"; show_usage; exit 2; }
                 case "$2" in
-                    kind|openshift) INSTALL_TARGET="$2" ;;
+                    kind|openshift|vm) INSTALL_TARGET="$2" ;;
                     *)
-                        log_error "Unsupported target '${2}'. Supported values: kind, openshift"
+                        log_error "Unsupported target '${2}'. Supported values: kind, openshift, vm"
                         exit 2 ;;
                 esac
                 shift 2 ;;
