@@ -175,14 +175,14 @@ Add an entry to the `modules` array in [`modules.json`](../modules.json).
 }
 ```
 
-| Field | Choose |
-|---|---|
-| `id` | Lowercase letters, digits and `_` only (`^[a-z0-9_]+$`). It must be unique, and it is the prefix of `<id>_health` |
-| `name` | Display name shown in progress output and the summary |
-| `source_lib` | Relative path, no `..` and no leading `/` |
-| `targets` | `["*"]` for all targets, or a list of `"kind"` / `"openshift"` |
-| `required` | `true` aborts the installer if this module fails. `false` warns and continues |
-| `depends_on` | Ids of modules that must be installed first. An empty list `[]` puts the module in wave 1 |
+| Field | Choose                                                                                                                                          |
+|---|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id` | Lowercase letters, digits and `_` only (`^[a-z0-9_]+$`). It must be unique, and it is the prefix of `<id>_health`                               |
+| `name` | Display name shown in progress output and the summary                                                                                           |
+| `source_lib` | Relative path, no `..` and no leading `/`                                                                                                       |
+| `targets` | `["*"]` for all targets, or a list of `"kind"` / `"openshift"`. `"vm"` is accepted by the schema but is **not yet supported** by this installer |
+| `required` | `true` aborts the installer if this module fails. `false` warns and continues                                                                   |
+| `depends_on` | Ids of modules that must be installed first. An empty list `[]` puts the module in wave 1                                                       |
 
 ### Step 5: Register with Causa MCP (MCP servers only)
 
@@ -243,9 +243,6 @@ jq . manifests/causa/mcp.json manifests/openshift/causa/mcp.json > /dev/null   #
 # 3. The image flag was picked up
 ./install.sh --help | grep demo-image
 
-# 4. Registry tests, including the real modules.json
-bash tests/test_parallel_waves.sh
-
 # 5. Real install, then check the log
 ./install.sh
 grep -n "Demo" install.log
@@ -297,5 +294,4 @@ Limits:
 - [ ] The new MCP server is in `manifests/causa/mcp.json`, and in `manifests/openshift/causa/mcp.json` if it runs on OpenShift (if Causa should call it)
 - [ ] The NodePort is unused, and `lib/install_kind_cluster.sh` is updated if it must be host-visible (if it needs one)
 - [ ] `./install.sh --dry-run` passes for both `kind` and `openshift`
-- [ ] `bash tests/test_parallel_waves.sh` passes
 - [ ] `install.sh` and `lib/validator.sh` are unchanged

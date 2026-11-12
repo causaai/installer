@@ -144,10 +144,23 @@ _is_openshift_target() {
 }
 
 ################################################################################
+# _check_target_implemented — stops when INSTALL_TARGET has no implementation in
+# this installer. The vm target is accepted here but not implemented; the
+# runtimes installer redefines this function to allow it.
+################################################################################
+_check_target_implemented() {
+    if [[ "${INSTALL_TARGET}" == "vm" ]]; then
+        log_info "Target VM - not yet supported"
+        exit 0
+    fi
+}
+
+################################################################################
 # main — install
 ################################################################################
 main() {
     local start_time; start_time=$(date +%s)
+    _check_target_implemented
 
     write_to_log_file "INFO" "Starting Causa RCA installation..."
     write_to_log_file "INFO" "Target:         ${INSTALL_TARGET}"
@@ -409,7 +422,7 @@ show_usage() {
     echo "    --target TARGET               Target platform (default: kind)"
     echo "                                    kind       — provisions a local Kind cluster"
     echo "                                    openshift  — deploys into an existing OpenShift cluster"
-    echo "                                    vm         — deploys onto a virtual machine"
+    echo "                                    vm         — not yet supported (accepted, does nothing)"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
     echo "    --delete-cluster              Also delete the Kind cluster when terminating"
