@@ -28,6 +28,7 @@ For installation steps, see the [Installation Guide](installation.md).
 | `DRY_RUN` | `false` | Set to `true` to validate without installing |
 | `TERMINATE` | `false` | Set to `true` to uninstall |
 | `DELETE_CLUSTER` | `false` | Set to `true` to delete cluster on terminate (kind only) |
+| `CNPG_DELETE_CRDS` | `false` | Set to `true` to also delete the cluster-wide CloudNativePG CRDs (`*.cnpg.io`) on OpenShift uninstall. This removes every CNPG resource in all namespaces, so use it only when this installer owns the operator |
 
 ### Kind-specific
 

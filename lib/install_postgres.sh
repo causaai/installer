@@ -80,7 +80,7 @@ _cnpg_install_operator() {
         write_to_log_file "INFO" "OperatorGroup already exists in ${ns} — skipping"
     else
         write_to_log_file "INFO" "Creating OperatorGroup..."
-        local tmp_og; tmp_og=$(mktemp /tmp/causa-cnpg-og-XXXXXX.yaml)
+        local tmp_og; tmp_og=$(make_temp cnpg-og)
         sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${_CNPG_OPERATOR_GROUP_YAML}" > "${tmp_og}"
         if ! ${KUBE_CLI} apply -f "${tmp_og}" -n "${ns}" >>"${LOG_FILE}" 2>&1; then
             rm -f "${tmp_og}"
@@ -189,7 +189,7 @@ _cnpg_create_db_cluster() {
     fi
 
     write_to_log_file "INFO" "Applying CNPG Cluster manifest (image: ${pg_image})..."
-    local tmp_cluster; tmp_cluster=$(mktemp /tmp/causa-cnpg-cluster-XXXXXX.yaml)
+    local tmp_cluster; tmp_cluster=$(make_temp cnpg-cluster)
     sed "s|PLACEHOLDER_OCP_POSTGRES_IMAGE|${pg_image}|g" \
         "${_CNPG_DB_CLUSTER_YAML}" > "${tmp_cluster}"
     # Namespace injected via -n flag; manifest has no namespace field
@@ -381,6 +381,7 @@ uninstall_postgres() {
         return 0
     fi
 
+    local rc=0
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local ns="${INSTALL_NAMESPACE}"
         local op_ns
@@ -396,13 +397,37 @@ uninstall_postgres() {
             -n "${op_ns}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
 
         write_to_log_file "INFO" "Deleting CNPG CSV..."
-        ${KUBE_CLI} get csv -n "${op_ns}" -o name 2>/dev/null \
-            | grep cloudnative \
-            | xargs -r ${KUBE_CLI} delete -n "${op_ns}" >>"${LOG_FILE}" 2>&1 || true
+        local csvs
+        csvs=$(${KUBE_CLI} get csv -n "${op_ns}" -o name 2>/dev/null | grep cloudnative || true)
+        if [[ -n "${csvs}" ]]; then
+            ${KUBE_CLI} delete -n "${op_ns}" ${csvs} >>"${LOG_FILE}" 2>&1 || true
+        fi
 
         write_to_log_file "INFO" "Deleting CNPG OperatorGroup..."
         ${KUBE_CLI} delete operatorgroup cnpg-operator-group \
             -n "${op_ns}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+
+        # Opt-in: CRDs are cluster-wide, and deleting one also deletes every CR of
+        # that kind in all namespaces, so this is off by default.  Set it only when
+        # this installer owns the CNPG operator (not a shared, pre-existing one).
+        if [[ "${CNPG_DELETE_CRDS:-false}" == "true" ]]; then
+            write_to_log_file "INFO" "Deleting CNPG CRDs (CNPG_DELETE_CRDS=true)..."
+            local all_crds crds
+            if ! all_crds=$(${KUBE_CLI} get crd -o name 2>>"${LOG_FILE}"); then
+                write_to_log_file "ERROR" "Failed to list CRDs; CNPG CRDs were not deleted"
+                rc=1
+            else
+                # grep exits 1 when nothing matches, which just means no CNPG CRDs remain
+                crds=$(printf '%s\n' "${all_crds}" | grep -E '\.cnpg\.io$' || true)
+                if [[ -n "${crds}" ]]; then
+                    # shellcheck disable=SC2086  # intentional word splitting: one CRD name per word
+                    if ! ${KUBE_CLI} delete --ignore-not-found=true ${crds} >>"${LOG_FILE}" 2>&1; then
+                        write_to_log_file "ERROR" "Failed to delete CNPG CRDs (see ${LOG_FILE})"
+                        rc=1
+                    fi
+                fi
+            fi
+        fi
     else
         delete_manifest "${_PG_MANIFEST}" "${INSTALL_NAMESPACE}"
         ${KUBE_CLI} delete secret postgres-credentials \
@@ -412,6 +437,10 @@ uninstall_postgres() {
     ${KUBE_CLI} delete secret "${_PG_SECRET_NAME}" \
         -n "${INSTALL_NAMESPACE}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
 
+    if (( rc != 0 )); then
+        write_to_log_file "ERROR" "PostgreSQL uninstall incomplete"
+        return "${rc}"
+    fi
     write_to_log_file "SUCCESS" "PostgreSQL uninstalled"
     return 0
 }

@@ -154,7 +154,7 @@ _ocp_enable_user_workload_monitoring() {
 ################################################################################
 _ocp_configure_uwm_alertmanager() {
     local webhook_url; webhook_url=$(_ocp_causa_alertmanager_webhook_url)
-    local tmp; tmp=$(mktemp /tmp/causa-ocp-alertmanager-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp ocp-alertmanager)
 
     cat > "${tmp}" << YAML
 global:
@@ -238,14 +238,14 @@ _ocp_configure_platform_alertmanager() {
     # Build the merged config:
     # Append the causa-webhook receiver to the receivers list and add a
     # child route that matches only Causa's own PrometheusRule alerts.
-    local tmp_cfg; tmp_cfg=$(mktemp /tmp/causa-ocp-am-config-XXXXXX.yaml)
+    local tmp_cfg; tmp_cfg=$(make_temp ocp-am-config)
 
     # Use Python with PyYAML to safely merge the YAML.
     # Both python3 and the yaml module are required; fail fast if either is absent.
     if command -v python3 &>/dev/null && python3 -c 'import yaml' &>/dev/null; then
         # Write existing config to a temp file — we cannot use both a pipe and
         # a heredoc to the same python3 process (heredoc wins, pipe is ignored).
-        local tmp_in; tmp_in=$(mktemp /tmp/causa-ocp-am-in-XXXXXX.yaml)
+        local tmp_in; tmp_in=$(make_temp ocp-am-in)
         echo "${existing_config}" > "${tmp_in}"
 
         python3 << PYEOF
@@ -357,7 +357,7 @@ _ocp_apply_prometheus_rule() {
 _ocp_apply_network_policy() {
     write_to_log_file "INFO" "Applying NetworkPolicy for Alertmanager + ingress → Causa Backend..."
 
-    local tmp; tmp=$(mktemp /tmp/causa-ocp-netpol-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp ocp-netpol)
 
     # Allow from:
     #   1. Both possible Alertmanager namespaces (platform + UWM) — topology-agnostic.
@@ -493,8 +493,8 @@ disable_monitoring() {
             -o jsonpath='{.data.alertmanager\.yaml}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
         if echo "${existing}" | grep -q "causa-webhook"; then
             if command -v python3 &>/dev/null; then
-                local tmp_clean; tmp_clean=$(mktemp /tmp/causa-ocp-am-clean-XXXXXX.yaml)
-                local tmp_existing; tmp_existing=$(mktemp /tmp/causa-ocp-am-existing-XXXXXX.yaml)
+                local tmp_clean; tmp_clean=$(make_temp ocp-am-clean)
+                local tmp_existing; tmp_existing=$(make_temp ocp-am-existing)
                 echo "${existing}" > "${tmp_existing}"
                 python3 << PYEOF
 import yaml
@@ -536,7 +536,7 @@ PYEOF
     local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
     local manifest="${prom_dir}/prometheusrule.yaml"
     if [[ -f "${manifest}" ]]; then
-        local tmp; tmp=$(mktemp /tmp/causa-ocp-prom-rule-XXXXXX.yaml)
+        local tmp; tmp=$(make_temp ocp-prom-rule)
         sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
         ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
         rm -f "${tmp}"

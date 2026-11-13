@@ -113,8 +113,8 @@ _prometheus_already_installed() {
 # Prints the path to the temp file.
 ################################################################################
 _write_alertmanager_values() {
-    local values_file; values_file=$(mktemp /tmp/causa-prometheus-values-XXXXXX.yaml) || {
-        log_error "mktemp failed for /tmp/causa-prometheus-values-XXXXXX.yaml"
+    local values_file; values_file=$(make_temp prometheus-values) || {
+        log_error "Failed to create temporary file for Prometheus values"
         return 1
     }
     local webhook_url; webhook_url=$(_causa_alertmanager_webhook_url)
@@ -322,7 +322,7 @@ install_prometheus() {
     for manifest in "${prom_dir}/prometheusrule.yaml" "${prom_dir}/networkpolicy.yaml"; do
         if [[ -f "${manifest}" ]]; then
             write_to_log_file "INFO" "Applying manifest: ${manifest}"
-            local tmp; tmp=$(mktemp /tmp/causa-prom-manifest-XXXXXX.yaml)
+            local tmp; tmp=$(make_temp prom-manifest)
             sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
             if ! ${KUBE_CLI} apply -f "${tmp}" >>"${LOG_FILE}" 2>&1; then
                 rm -f "${tmp}"
@@ -377,7 +377,7 @@ uninstall_prometheus() {
     local prom_dir="${SCRIPT_DIR}/manifests/prometheus"
     for manifest in "${prom_dir}/prometheusrule.yaml" "${prom_dir}/networkpolicy.yaml"; do
         if [[ -f "${manifest}" ]]; then
-            local tmp; tmp=$(mktemp /tmp/causa-prom-manifest-XXXXXX.yaml)
+            local tmp; tmp=$(make_temp prom-manifest)
             sed "s/PLACEHOLDER_NAMESPACE/${INSTALL_NAMESPACE}/g" "${manifest}" > "${tmp}"
             ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
             rm -f "${tmp}"

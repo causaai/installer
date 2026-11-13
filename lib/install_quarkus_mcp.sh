@@ -64,10 +64,9 @@ install_quarkus_mcp() {
         write_to_log_file "INFO" "Using kube-prometheus-stack URL: ${prom_url}"
     fi
 
-    # Fix (comment 2): check mktemp before using the path; use $$ in the name
-    # to avoid collisions with leftover files from interrupted runs.
+    # Temp files live in the per-run installer temp dir and are removed on exit.
     local tmp
-    if ! tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml); then
+    if ! tmp=$(make_temp manifest); then
         log_error "Failed to create temporary file for Quarkus MCP manifest"
         return 1
     fi
