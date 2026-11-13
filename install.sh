@@ -312,6 +312,7 @@ main() {
 ################################################################################
 uninstall_main() {
     local start_time; start_time=$(date +%s)
+    _check_target_implemented
 
     log_file_only "Starting Causa RCA uninstallation..."
 
