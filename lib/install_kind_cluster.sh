@@ -117,7 +117,7 @@ _check_ports_available() {
             if echo "${owner}" | grep -qiE 'rootless|gvproxy'; then
                 local active_container
                 active_container=$(${runtime} ps --format '{{.Ports}}' 2>/dev/null \
-                    | grep -c "0\.0\.0\.0:${port}->\|127\.0\.0\.1:${port}->" || true)
+                    | grep -cE "(0\.0\.0\.0|127\.0\.0\.1):${port}->" || true)
                 if [[ "${active_container:-0}" -eq 0 ]]; then
                     write_to_log_file "INFO" "Port ${port} held by gvproxy/rootlessport (${owner}) with no active container — stale lease, Kind will reuse it"
                 else
@@ -145,7 +145,7 @@ _check_ports_available() {
 
 # _write_kind_config — writes cluster config YAML to a temp file and prints the path
 _write_kind_config() {
-    local config_file; config_file=$(mktemp /tmp/kind-config-XXXXXX.yaml)
+    local config_file; config_file=$(make_temp kind-config)
     local runtime="${CONTAINER_RUNTIME:-docker}"
 
     # In rootless setups (e.g. rootless Podman / Docker on cgroups v2), forcing

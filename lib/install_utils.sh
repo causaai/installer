@@ -23,6 +23,53 @@ readonly EXIT_INSTALLATION_FAILED=4
 readonly EXIT_VALIDATION_FAILED=5
 
 ################################################################################
+# Temporary files
+#
+# One private directory per installer run holds every temp file, so a single
+# `rm -rf` at exit (or on INT/TERM) removes them all — including files created
+# inside $( ) command substitutions and parallel wave subshells, where a list
+# kept in a shell variable would be lost.
+#
+#   init_temp_dir        call once, early, in the top-level process
+#   make_temp <label>    prints the path of a new empty file: <dir>/<label>-XXXXXX
+#   cleanup_temp_files   removes the directory (idempotent)
+#
+# The directory is created under ${TMPDIR:-/tmp}; macOS sets TMPDIR to a private
+# per-user folder with a trailing slash, which is stripped.  BSD mktemp only
+# substitutes trailing X's, so never put a suffix such as ".yaml" after them.
+################################################################################
+_CAUSA_TMPDIR=""
+
+init_temp_dir() {
+    [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]] && return 0
+    local base="${TMPDIR:-/tmp}"
+    _CAUSA_TMPDIR=$(mktemp -d "${base%/}/causa-installer-$$-XXXXXX") || {
+        _CAUSA_TMPDIR=""
+        log_error "Failed to create the installer temporary directory under ${base}"
+        return 1
+    }
+}
+
+make_temp() {
+    local label="${1:-tmp}"
+    if [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]]; then
+        mktemp "${_CAUSA_TMPDIR}/${label}-XXXXXX"
+    else
+        # init_temp_dir was not called (standalone use, tests): still works, but
+        # the file is not removed automatically.
+        mktemp "${TMPDIR:-/tmp}/causa-${label}-XXXXXX"
+    fi
+}
+
+cleanup_temp_files() {
+    if [[ -n "${_CAUSA_TMPDIR}" ]]; then
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+    fi
+    return 0
+}
+
+################################################################################
 # Error / cleanup
 ################################################################################
 cleanup_on_error() {
@@ -33,6 +80,7 @@ cleanup_on_error() {
             echo -e "${COLOR_GREEN}Check log file for details: ${LOG_FILE}${COLOR_RESET}" > /dev/tty 2>/dev/null || true
         fi
     fi
+    cleanup_temp_files
 }
 
 ################################################################################
@@ -257,10 +305,12 @@ wait_for_deployment() {
     deadline=$(( $(date +%s) + 10#${timeout} ))
 
     while true; do
+        # Poll output is discarded: intermediate 5s timeouts are expected and
+        # would otherwise log misleading "error: timed out" lines.
         if ${KUBE_CLI} wait --for=condition=Available \
             deployment/"${name}" \
             -n "${ns}" \
-            --timeout=5s >>"${LOG_FILE}" 2>&1; then
+            --timeout=5s >/dev/null 2>&1; then
             write_to_log_file "SUCCESS" "Deployment ${name} is ready"
             return 0
         fi
@@ -378,7 +428,7 @@ apply_manifest() {
         return 1
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
 
     # Namespace and cluster-type substitution
     sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
@@ -417,7 +467,7 @@ delete_manifest() {
         return 0
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
     sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${manifest}" > "${tmp}"
 
     ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
@@ -430,6 +480,9 @@ delete_manifest() {
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+export -f init_temp_dir
+export -f make_temp
+export -f cleanup_temp_files
 export -f cleanup_on_error
 export -f enable_cleanup_trap
 export -f handle_error
