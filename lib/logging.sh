@@ -62,10 +62,17 @@ LOG_FILE="${LOG_FILE:-}"
 # Get timestamp in ISO 8601 format
 ################################################################################
 get_timestamp() {
-    # BSD date (macOS) has no %N and prints a literal "3N"; fall back to .000
-    local ts
-    ts=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
-    echo "${ts/.3NZ/.000Z}"
+    # One date call so seconds and milliseconds come from the same instant.
+    # BSD date (macOS) has no %N and echoes it back literally ("%N" or "N"), so
+    # take milliseconds only when %N produced 9 digits; otherwise use 000.
+    local out ts ns ms="000"
+    out=$(date -u +"%Y-%m-%dT%H:%M:%S %N")
+    ts="${out%% *}"
+    ns="${out#* }"
+    if [[ "${ns}" =~ ^[0-9]{9}$ ]]; then
+        ms="${ns:0:3}"
+    fi
+    echo "${ts}.${ms}Z"
 }
 
 ################################################################################

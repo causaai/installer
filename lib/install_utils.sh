@@ -39,6 +39,27 @@ readonly EXIT_VALIDATION_FAILED=5
 # substitutes trailing X's, so never put a suffix such as ".yaml" after them.
 ################################################################################
 _CAUSA_TMPDIR=""
+_CAUSA_TMPDIR_OWNER=""
+_CAUSA_CUR_PID=""
+
+# _set_current_shell_pid — sets _CAUSA_CUR_PID to the real PID of the running
+# shell, including inside $( ) and ( ) subshells, where $$ still reports the
+# top-level shell.  Must be called directly (never via $( ), which would fork).
+# bash 4+ has $BASHPID; bash 3.2 (macOS) does not, so ask a child `sh` for its
+# parent PID, writing to a file because capturing it would need a subshell.
+_set_current_shell_pid() {
+    _CAUSA_CUR_PID=""
+    if [[ -n "${BASHPID:-}" ]]; then
+        _CAUSA_CUR_PID="${BASHPID}"
+        return 0
+    fi
+    local probe
+    probe=$(mktemp "${_CAUSA_TMPDIR}/pid-XXXXXX") || return 1
+    sh -c 'echo $PPID' >"${probe}"
+    read -r _CAUSA_CUR_PID <"${probe}" || true
+    rm -f "${probe}"
+    [[ -n "${_CAUSA_CUR_PID}" ]]
+}
 
 init_temp_dir() {
     [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]] && return 0
@@ -48,6 +69,13 @@ init_temp_dir() {
         log_error "Failed to create the installer temporary directory under ${base}"
         return 1
     }
+    _set_current_shell_pid || {
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+        log_error "Failed to determine the installer shell PID"
+        return 1
+    }
+    _CAUSA_TMPDIR_OWNER="${_CAUSA_CUR_PID}"
 }
 
 make_temp() {
@@ -61,8 +89,13 @@ make_temp() {
     fi
 }
 
+# Removes the directory only from the shell that created it.  A subshell (for
+# example the one running `tmp=$(make_temp label)`) may run an inherited EXIT
+# trap; it must not delete the directory the parent is still using.
 cleanup_temp_files() {
     if [[ -n "${_CAUSA_TMPDIR}" ]]; then
+        _set_current_shell_pid || return 0
+        [[ "${_CAUSA_CUR_PID}" == "${_CAUSA_TMPDIR_OWNER}" ]] || return 0
         rm -rf "${_CAUSA_TMPDIR}"
         _CAUSA_TMPDIR=""
     fi
@@ -304,15 +337,21 @@ wait_for_deployment() {
     write_to_log_file "INFO" "Waiting for deployment ${name} in ${ns} (timeout: ${timeout}s)..."
     deadline=$(( $(date +%s) + 10#${timeout} ))
 
+    local wait_out last_wait_err=""
     while true; do
-        # Poll output is discarded: intermediate 5s timeouts are expected and
-        # would otherwise log misleading "error: timed out" lines.
-        if ${KUBE_CLI} wait --for=condition=Available \
+        # Intermediate 5s timeouts are expected and not logged; any other
+        # failure (API/authorization/not found) is logged once per distinct message.
+        if wait_out=$(${KUBE_CLI} wait --for=condition=Available \
             deployment/"${name}" \
             -n "${ns}" \
-            --timeout=5s >/dev/null 2>&1; then
+            --timeout=5s 2>&1); then
             write_to_log_file "SUCCESS" "Deployment ${name} is ready"
             return 0
+        fi
+        if [[ -n "${wait_out}" && "${wait_out}" != *"timed out waiting for the condition"* \
+              && "${wait_out}" != "${last_wait_err}" ]]; then
+            write_to_log_file "WARN" "Deployment ${name}: ${KUBE_CLI} wait failed: ${wait_out}"
+            last_wait_err="${wait_out}"
         fi
 
         reasons=""

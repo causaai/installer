@@ -381,6 +381,7 @@ uninstall_postgres() {
         return 0
     fi
 
+    local rc=0
     if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
         local ns="${INSTALL_NAMESPACE}"
         local op_ns
@@ -411,10 +412,20 @@ uninstall_postgres() {
         # this installer owns the CNPG operator (not a shared, pre-existing one).
         if [[ "${CNPG_DELETE_CRDS:-false}" == "true" ]]; then
             write_to_log_file "INFO" "Deleting CNPG CRDs (CNPG_DELETE_CRDS=true)..."
-            local crds
-            crds=$(${KUBE_CLI} get crd -o name 2>/dev/null | grep '\.cnpg\.io$' || true)
-            if [[ -n "${crds}" ]]; then
-                ${KUBE_CLI} delete --ignore-not-found=true ${crds} >>"${LOG_FILE}" 2>&1 || true
+            local all_crds crds
+            if ! all_crds=$(${KUBE_CLI} get crd -o name 2>>"${LOG_FILE}"); then
+                write_to_log_file "ERROR" "Failed to list CRDs; CNPG CRDs were not deleted"
+                rc=1
+            else
+                # grep exits 1 when nothing matches, which just means no CNPG CRDs remain
+                crds=$(printf '%s\n' "${all_crds}" | grep -E '\.cnpg\.io$' || true)
+                if [[ -n "${crds}" ]]; then
+                    # shellcheck disable=SC2086  # intentional word splitting: one CRD name per word
+                    if ! ${KUBE_CLI} delete --ignore-not-found=true ${crds} >>"${LOG_FILE}" 2>&1; then
+                        write_to_log_file "ERROR" "Failed to delete CNPG CRDs (see ${LOG_FILE})"
+                        rc=1
+                    fi
+                fi
             fi
         fi
     else
@@ -426,6 +437,10 @@ uninstall_postgres() {
     ${KUBE_CLI} delete secret "${_PG_SECRET_NAME}" \
         -n "${INSTALL_NAMESPACE}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
 
+    if (( rc != 0 )); then
+        write_to_log_file "ERROR" "PostgreSQL uninstall incomplete"
+        return "${rc}"
+    fi
     write_to_log_file "SUCCESS" "PostgreSQL uninstalled"
     return 0
 }
