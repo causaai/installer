@@ -63,22 +63,49 @@ Deployable components are declared in [`modules.json`](../modules.json) and run 
 | `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
 | `depends_on` | Module ids that must be installed first |
 
-- **Waves:** a module runs in a later wave than all of its dependencies. Modules in the same wave run **concurrently**, each in its own process group; a wave finishes when all of its modules have finished, and the next wave starts only then. Each module's output is buffered and printed in `modules.json` order once the wave ends, so it is never interleaved. If a `required` module fails, the still-running modules of that wave are terminated (including any processes they spawned) and no later wave starts. Ctrl-C / `SIGTERM` terminates the whole wave the same way. Modules must therefore not rely on a sibling in the same wave having run first — declare such a need with `depends_on`. Uninstall runs sequentially in reverse order.
-- **Dependency not installed:** a dependent of a failed or skipped module is skipped with a warning — or aborts the installer if the dependent is `required`.
-- **Dependency filtered out by target:** a dependency whose `targets` do not include the selected target can never be installed there, so it is ignored and does not block its dependents. For example, `quarkus_mcp` depends on `prometheus` (Kind only); on OpenShift, where Prometheus is the built-in monitoring stack, `quarkus_mcp` still installs. Likewise `jafra_mcp` (depends on `jafra`) and `prometheus_mcp` are Kind-only themselves, so they are filtered out on OpenShift.
-- **Health checks:** nothing is declared in `modules.json`. After the install, `post_component_validation` calls `registry_check_health`, which looks for a function named `<id>_health` (for example `k8s_mcp_health`, `postgres_health`) defined by the module's own `source_lib`. Exit `0` means healthy; anything printed to stdout is shown as the failure detail. A module without one is not checked, a module whose install was skipped or failed is reported as "not installed", and modules not applicable to the target are omitted. `check_deployment_healthy <deployment>` in `lib/install_utils.sh` covers the common case of a plain Deployment. The check is skipped on `--dry-run`, since nothing is deployed.
-- **Skipped installs:** an `install_fn` that deliberately deploys nothing (for example, its image is unset) returns exit status `2`. The runner does not log it as installed or list it in the summary, and its dependents are skipped. Exit `0` means deployed (or a dry run); any other non-zero status is a failure.
-- **Validation:** `modules.json` is validated before any cluster work (JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, missing `source_lib` / functions).
-- **Not in the registry:** manifest paths stay in each `source_lib`; image variables live only in `lib/images.env` (see [Image resolution](#image-resolution)). Kind cluster provisioning, cert-manager and OpenShift monitoring remain in `install.sh`.
+### Wave architecture
+
+Two files describe the whole installation:
+
+- [`lib/images.env`](../lib/images.env) describes **which image** each component uses.
+- [`modules.json`](../modules.json) describes **which components** exist and what they depend on.
+
+![Installer overview](images/installer-flow.svg)
+
+`install.sh` loads both files, then installs the modules in waves. A module's wave is 1 plus the highest wave among its dependencies, and a module with no dependencies is in wave 1. Modules inside a wave install in parallel. A wave starts only after the previous wave has finished.
+
+#### Waves on the Kind target
+
+Arrows point from a dependency to the module that depends on it.
+
+![Installation waves on the Kind target](images/waves-kind.svg)
+
+#### Waves on the OpenShift target
+
+`prometheus`, `jafra`, `jafra_mcp` and `prometheus_mcp` list only `kind` in `targets`, so they are neither sourced nor installed. Waves are computed for the selected target, and a dependency that does not apply to it is ignored. `quarkus_mcp` depends on `prometheus`, which is pre-installed on OpenShift, so it moves to wave 1 and installs in parallel with `postgres` and `k8s_mcp`.
+
+![Installation waves on the OpenShift target](images/waves-openshift.svg)
+
+### Runtime behaviour
+
+| Situation | Result |
+|---|---|
+| A wave runs | Modules run concurrently. Their output is buffered and written to the log in `modules.json` order after the wave ends. Modules must not rely on a sibling in the same wave, so declare the need with `depends_on` |
+| A `required` module fails | The rest of the wave is stopped, no later wave starts, and the installer exits 1. Ctrl-C and `SIGTERM` stop the wave the same way |
+| An optional module fails | Warning, and the install continues. Its dependents are skipped, or the installer aborts if a dependent is `required` |
+| `install_fn` returns `2` | Skipped on purpose (for example, its image is unset). It is not listed as installed, and its dependents are skipped. `0` is success, and any other non-zero value is a failure |
+| A dependency does not apply to the target | Ignored: it neither blocks the dependent nor delays its wave. `quarkus_mcp` is in wave 2 on Kind and wave 1 on OpenShift |
+| Health check | After the install, `registry_check_health` runs each module's `<id>_health` function if it has one. Exit `0` means healthy. Nothing is declared in `modules.json`. See `check_deployment_healthy` in `lib/install_utils.sh` |
+| `--terminate` | Runs `uninstall_fn` one module at a time, in reverse order |
+| `--dry-run` | Validates and walks the waves without deploying. Health checks are skipped |
+
+`modules.json` is validated before any cluster work: JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, and missing `source_lib` or functions.
+
+**Not in the registry:** manifest paths (each `source_lib` owns them), image variables (see [Image resolution](#image-resolution)), and Kind cluster, cert-manager and OpenShift monitoring setup (`install.sh`).
 
 ### Adding a new component
 
-1. **Script:** create `lib/install_<name>.sh` defining the install and uninstall functions (and optionally `<id>_health`), plus its `manifests/<name>/`.
-2. **Registry:** add one entry to `modules.json` (`id`, `source_lib`, `install_fn`, `uninstall_fn`, `targets`, `required`, `depends_on`).
-3. **Image (if any):** add one entry to `lib/images.env` — see below.
-
-`install.sh` and `lib/validator.sh` are not edited.
-
+Add the manifests, a `lib/install_<name>.sh`, one entry in `modules.json` and, if the component has an image, one entry in `lib/images.env`. `install.sh` and `lib/validator.sh` are not edited. If Causa should call the new MCP server, also register it in the two `mcp.json` files. See [Adding a new component](adding-a-component.md) for the steps, an example and a checklist.
 
 ## Target-specific behaviour
 

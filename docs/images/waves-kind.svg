@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 390" width="780" height="390" font-family="-apple-system, 'Segoe UI', system-ui, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Installation waves on the Kind target</title>
+  <desc id="d">Wave 1: prometheus, jafra, postgres, k8s_mcp. Wave 2: quarkus_mcp and prometheus_mcp (depend on prometheus), jafra_mcp (depends on jafra), causa_backend (depends on postgres). Wave 3: causa_mcp (depends on causa_backend).</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <rect width="780" height="390" fill="#ffffff"/>
+
+  <!-- wave panels -->
+  <g fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1">
+    <rect x="30"  y="20" width="200" height="310" rx="8"/>
+    <rect x="290" y="20" width="200" height="310" rx="8"/>
+    <rect x="550" y="20" width="200" height="310" rx="8"/>
+  </g>
+  <g font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">
+    <text x="130" y="46">Wave 1 (parallel)</text>
+    <text x="390" y="46">Wave 2 (parallel)</text>
+    <text x="650" y="46">Wave 3</text>
+  </g>
+
+  <!-- dependency arrows -->
+  <g stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)">
+    <line x1="210" y1="92"  x2="310" y2="92"/>   <!-- prometheus -> quarkus_mcp -->
+    <line x1="210" y1="92"  x2="310" y2="156"/>  <!-- prometheus -> prometheus_mcp -->
+    <line x1="210" y1="156" x2="310" y2="220"/>  <!-- jafra -> jafra_mcp -->
+    <line x1="210" y1="220" x2="310" y2="284"/>  <!-- postgres -> causa_backend -->
+    <line x1="470" y1="284" x2="570" y2="284"/>  <!-- causa_backend -> causa_mcp -->
+  </g>
+
+  <!-- wave 1 (bold border = required) -->
+  <g text-anchor="middle">
+    <rect x="50" y="70"  width="160" height="44" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="2.5"/>
+    <text x="130" y="89"  font-size="14" font-weight="600" fill="#1f2328">prometheus</text>
+    <text x="130" y="105" font-size="11" fill="#57606a">required</text>
+
+    <rect x="50" y="134" width="160" height="44" rx="6" fill="#ffffff" stroke="#9aa4b2" stroke-width="1"/>
+    <text x="130" y="153" font-size="14" font-weight="600" fill="#1f2328">jafra</text>
+    <text x="130" y="169" font-size="11" fill="#57606a">optional</text>
+
+    <rect x="50" y="198" width="160" height="44" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="2.5"/>
+    <text x="130" y="217" font-size="14" font-weight="600" fill="#1f2328">postgres</text>
+    <text x="130" y="233" font-size="11" fill="#57606a">required</text>
+
+    <rect x="50" y="262" width="160" height="44" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="2.5"/>
+    <text x="130" y="281" font-size="14" font-weight="600" fill="#1f2328">k8s_mcp</text>
+    <text x="130" y="297" font-size="11" fill="#57606a">required</text>
+  </g>
+
+  <!-- wave 2 -->
+  <g text-anchor="middle">
+    <rect x="310" y="70"  width="160" height="44" rx="6" fill="#ffffff" stroke="#9aa4b2" stroke-width="1"/>
+    <text x="390" y="89"  font-size="14" font-weight="600" fill="#1f2328">quarkus_mcp</text>
+    <text x="390" y="105" font-size="11" fill="#57606a">optional</text>
+
+    <rect x="310" y="134" width="160" height="44" rx="6" fill="#ffffff" stroke="#9aa4b2" stroke-width="1"/>
+    <text x="390" y="153" font-size="14" font-weight="600" fill="#1f2328">prometheus_mcp</text>
+    <text x="390" y="169" font-size="11" fill="#57606a">optional</text>
+
+    <rect x="310" y="198" width="160" height="44" rx="6" fill="#ffffff" stroke="#9aa4b2" stroke-width="1"/>
+    <text x="390" y="217" font-size="14" font-weight="600" fill="#1f2328">jafra_mcp</text>
+    <text x="390" y="233" font-size="11" fill="#57606a">optional</text>
+
+    <rect x="310" y="262" width="160" height="44" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="2.5"/>
+    <text x="390" y="281" font-size="14" font-weight="600" fill="#1f2328">causa_backend</text>
+    <text x="390" y="297" font-size="11" fill="#57606a">required</text>
+  </g>
+
+  <!-- wave 3 -->
+  <g text-anchor="middle">
+    <rect x="570" y="262" width="160" height="44" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="2.5"/>
+    <text x="650" y="281" font-size="14" font-weight="600" fill="#1f2328">causa_mcp</text>
+    <text x="650" y="297" font-size="11" fill="#57606a">required</text>
+  </g>
+
+  <!-- legend -->
+  <text x="30" y="360" font-size="12" fill="#57606a">Arrows point from a dependency to the module that depends on it. A bold blue border marks a required module.</text>
+  <text x="30" y="378" font-size="12" fill="#57606a">A wave starts only after the previous wave has finished.</text>
+</svg>
