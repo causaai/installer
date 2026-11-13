@@ -27,14 +27,8 @@ readonly _PG_DB_NAME="iri-db"
 readonly _PG_MANIFEST="${SCRIPT_DIR}/manifests/postgres/deployment.yaml"
 readonly _PG_USER="causa_backend"
 readonly _PG_PASS="causa_backend_pass"
-# Image defaults — resolved at call time inside install_postgres so that
-# CLI overrides (--postgres-kind-image / --postgres-ocp-image) take effect.
-readonly _PG_KIND_IMAGE_DEFAULT="docker.io/pgvector/pgvector:pg17"
 
 # ── OpenShift / CNPG constants ─────────────────────────────────────────────────
-# Image default — resolved at call time (see _cnpg_create_db_cluster).
-readonly _PG_OCP_IMAGE_DEFAULT="quay.io/causa-ai-hub/postgres-pgvector:17"
-
 readonly _CNPG_OPERATOR_NAME="cloudnative-pg"
 readonly _CNPG_OPERATOR_GROUP_YAML="${SCRIPT_DIR}/manifests/postgres/operator/operator_group.yaml"
 readonly _CNPG_SUBSCRIPTION_YAML="${SCRIPT_DIR}/manifests/postgres/operator/cnpg_subscription.yaml"
@@ -160,7 +154,12 @@ _cnpg_db_cluster_ready() {
 ################################################################################
 _cnpg_create_db_cluster() {
     local ns="$1"
-    local pg_image="${POSTGRES_OCP_IMAGE:-${_PG_OCP_IMAGE_DEFAULT}}"
+    local pg_image="${POSTGRES_OCP_IMAGE:-}"
+
+    if [[ -z "${pg_image}" ]]; then
+        log_error "PostgreSQL OpenShift image (POSTGRES_OCP_IMAGE) is not configured"
+        return 1
+    fi
 
     if ${KUBE_CLI} get cluster.postgresql.cnpg.io "${_CNPG_DB_CLUSTER_NAME}" \
             -n "${ns}" &>/dev/null; then
@@ -323,7 +322,11 @@ install_postgres() {
     fi
 
     # ── kind: standalone Deployment path ─────────────────────────────────────
-    local pg_image="${POSTGRES_KIND_IMAGE:-${_PG_KIND_IMAGE_DEFAULT}}"
+    local pg_image="${POSTGRES_KIND_IMAGE:-}"
+    if [[ -z "${pg_image}" ]]; then
+        log_error "PostgreSQL Kind image (POSTGRES_KIND_IMAGE) is not configured"
+        return 1
+    fi
     write_to_log_file "INFO" "Using image: ${pg_image}"
 
     write_to_log_file "INFO" "Creating postgres-credentials secret..."

@@ -77,6 +77,8 @@ Priority order (highest to lowest):
 
 ### CLI flags
 
+Flags are generated from the variable names in `lib/images.env` (`FOO_BAR_IMAGE` → `--foo-bar-image`); run `./install.sh --help` for the current list. To add one, add a `*_IMAGE` entry to `lib/images.env` — no other file changes.
+
 | Flag | Component | Target |
 |---|---|---|
 | `--k8s-mcp-server-image IMAGE` | Kubernetes MCP Server | both |
@@ -91,6 +93,39 @@ Priority order (highest to lowest):
 | `--jafra-agent-image IMAGE` | Jafra Agent | kind only |
 
 ### Environment variables
+
+Any image can be set by exporting its variable before running the installer — no flag needed:
+
+```bash
+export CAUSA_MCP_IMAGE=quay.io/causaai/causa-mcp:v0.1.0
+./install.sh
+
+# or for a single run
+CAUSA_MCP_IMAGE=quay.io/causaai/causa-mcp:v0.1.0 ./install.sh
+```
+
+Precedence: CLI flag > exported variable > default in `lib/images.env`. The exported value is validated like any other (see [Image validation](#image-validation)).
+
+**A variable only takes effect if it is declared in `lib/images.env`.** The installer discovers images from that file, so an exported `*_IMAGE` variable that is not declared there is ignored — it is not validated and has no CLI flag. To pass a new image variable:
+
+1. Declare it once in `lib/images.env`, with a comment above it (used for the `--help` text):
+
+   ```bash
+   # Widget Service
+   WIDGET_SERVICE_IMAGE=${WIDGET_SERVICE_IMAGE:-quay.io/org/widget:1.0.0}
+   ```
+
+2. Export it (or pass `--widget-service-image`):
+
+   ```bash
+   WIDGET_SERVICE_IMAGE=quay.io/org/widget:2.0.0 ./install.sh
+   ```
+
+3. Read `${WIDGET_SERVICE_IMAGE}` in the component's `lib/install_*.sh`.
+
+The variable name must match `^[A-Z][A-Z0-9_]*_IMAGE`, and always keep the `${VAR:-default}` form — a plain `VAR=value` would override the exported value.
+
+Variables currently declared:
 
 | Variable | Component | Target |
 |---|---|---|

@@ -27,16 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR
 
 # ---------------------------------------------------------------------------
-# Source images.env FIRST — defines image defaults; can be overridden by
-# CLI flags or exported env vars (priority: CLI > export > images.env)
-# ---------------------------------------------------------------------------
-IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
-if [[ -f "${IMAGES_ENV_FILE}" ]]; then
-    # shellcheck source=lib/images.env
-    source "${IMAGES_ENV_FILE}"
-fi
-
-# ---------------------------------------------------------------------------
 # Global configuration defaults
 # ---------------------------------------------------------------------------
 MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
@@ -85,40 +75,6 @@ export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 CAUSA_MCP_QUARKUS_METRICS_BASE_URL="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
 export CAUSA_MCP_QUARKUS_METRICS_BASE_URL
 
-# Image variables (populated by images.env; can be overridden via CLI flags)
-K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
-CAUSA_BACKEND_IMAGE="${CAUSA_BACKEND_IMAGE:-}"
-JAFRA_MCP_IMAGE="${JAFRA_MCP_IMAGE:-}"
-QUARKUS_MCP_IMAGE="${QUARKUS_MCP_IMAGE:-}"
-PROMETHEUS_MCP_SERVER_IMAGE="${PROMETHEUS_MCP_SERVER_IMAGE:-}"
-CAUSA_MCP_IMAGE="${CAUSA_MCP_IMAGE:-}"
-JAFRA_CONTROLLER_IMAGE="${JAFRA_CONTROLLER_IMAGE:-}"
-JAFRA_ANALYZER_IMAGE="${JAFRA_ANALYZER_IMAGE:-}"
-JAFRA_AGENT_IMAGE="${JAFRA_AGENT_IMAGE:-}"
-POSTGRES_KIND_IMAGE="${POSTGRES_KIND_IMAGE:-}"
-POSTGRES_OCP_IMAGE="${POSTGRES_OCP_IMAGE:-}"
-export K8S_MCP_SERVER_IMAGE CAUSA_BACKEND_IMAGE
-export JAFRA_MCP_IMAGE QUARKUS_MCP_IMAGE PROMETHEUS_MCP_SERVER_IMAGE CAUSA_MCP_IMAGE
-export JAFRA_CONTROLLER_IMAGE JAFRA_ANALYZER_IMAGE JAFRA_AGENT_IMAGE
-export POSTGRES_KIND_IMAGE POSTGRES_OCP_IMAGE
-
-# Sentinel flags — set to "true" only when a CLI flag explicitly overrides an image
-K8S_MCP_SERVER_IMAGE_OVERRIDDEN=false
-CAUSA_BACKEND_IMAGE_OVERRIDDEN=false
-JAFRA_MCP_IMAGE_OVERRIDDEN=false
-QUARKUS_MCP_IMAGE_OVERRIDDEN=false
-PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN=false
-CAUSA_MCP_IMAGE_OVERRIDDEN=false
-JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=false
-JAFRA_ANALYZER_IMAGE_OVERRIDDEN=false
-JAFRA_AGENT_IMAGE_OVERRIDDEN=false
-POSTGRES_KIND_IMAGE_OVERRIDDEN=false
-POSTGRES_OCP_IMAGE_OVERRIDDEN=false
-export K8S_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_BACKEND_IMAGE_OVERRIDDEN
-export JAFRA_MCP_IMAGE_OVERRIDDEN QUARKUS_MCP_IMAGE_OVERRIDDEN PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_MCP_IMAGE_OVERRIDDEN
-export JAFRA_CONTROLLER_IMAGE_OVERRIDDEN JAFRA_ANALYZER_IMAGE_OVERRIDDEN JAFRA_AGENT_IMAGE_OVERRIDDEN
-export POSTGRES_KIND_IMAGE_OVERRIDDEN POSTGRES_OCP_IMAGE_OVERRIDDEN
-
 # ---------------------------------------------------------------------------
 # Source library files
 # ---------------------------------------------------------------------------
@@ -126,11 +82,21 @@ export POSTGRES_KIND_IMAGE_OVERRIDDEN POSTGRES_OCP_IMAGE_OVERRIDDEN
 # sourced here — they are declared in modules.json and sourced by registry_load.
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/install_utils.sh"
+source "${SCRIPT_DIR}/lib/images.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
 source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
 source "${SCRIPT_DIR}/lib/module_runner.sh"
+
+# ---------------------------------------------------------------------------
+# Image variables, their <VAR>_OVERRIDDEN sentinels and CLI flags are all
+# derived from lib/images.env (see lib/images.sh) — nothing is listed here.
+# ---------------------------------------------------------------------------
+IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
+if ! images_load "${IMAGES_ENV_FILE}"; then
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Activate opt-in traps (scoped here, not in shared libraries)
@@ -453,16 +419,8 @@ show_usage() {
     echo "    --cluster-name NAME           Kind cluster name (default: causa-rca)"
     echo "    --registry-port PORT          Local registry port (default: 5001)"
     echo ""
-    echo "IMAGE OVERRIDE OPTIONS:"
-    echo "    --k8s-mcp-server-image IMAGE              Override Kubernetes MCP Server image"
-    echo "    --jafra-mcp-image IMAGE                    Override Jafra MCP Server image"
-    echo "    --causa-backend-image IMAGE                Override Causa Backend image"
-    echo "    --quarkus-mcp-image IMAGE                  Override Quarkus MCP Server image"
-    echo "    --prometheus-mcp-server-image IMAGE        Override Prometheus MCP Server image"
-    echo "    --causa-mcp-image IMAGE                    Override Causa MCP Server image"
-    echo "    --jafra-controller-image IMAGE             Override Jafra Controller image"
-    echo "    --jafra-analyzer-image IMAGE               Override Jafra Analyzer image"
-    echo "    --jafra-agent-image IMAGE                  Override Jafra Agent image"
+    echo "IMAGE OVERRIDE OPTIONS (generated from lib/images.env):"
+    images_usage
     echo ""
     echo "ENVIRONMENT VARIABLES:"
     echo "    INSTALL_TARGET                Target platform (kind)"
@@ -528,43 +486,17 @@ parse_arguments() {
             --registry-port)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --registry-port"; show_usage; exit 2; }
                 KIND_REGISTRY_PORT="$2"; shift 2 ;;
-            --k8s-mcp-server-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --k8s-mcp-server-image"; show_usage; exit 2; }
-                K8S_MCP_SERVER_IMAGE="$2"; K8S_MCP_SERVER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-mcp-image"; show_usage; exit 2; }
-                JAFRA_MCP_IMAGE="$2"; JAFRA_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --causa-backend-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --causa-backend-image"; show_usage; exit 2; }
-                CAUSA_BACKEND_IMAGE="$2"; CAUSA_BACKEND_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --quarkus-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --quarkus-mcp-image"; show_usage; exit 2; }
-                QUARKUS_MCP_IMAGE="$2"; QUARKUS_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --prometheus-mcp-server-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --prometheus-mcp-server-image"; show_usage; exit 2; }
-                PROMETHEUS_MCP_SERVER_IMAGE="$2"; PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --causa-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --causa-mcp-image"; show_usage; exit 2; }
-                CAUSA_MCP_IMAGE="$2"; CAUSA_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-controller-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-controller-image"; show_usage; exit 2; }
-                JAFRA_CONTROLLER_IMAGE="$2"; JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-analyzer-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-analyzer-image"; show_usage; exit 2; }
-                JAFRA_ANALYZER_IMAGE="$2"; JAFRA_ANALYZER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-agent-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-agent-image"; show_usage; exit 2; }
-                JAFRA_AGENT_IMAGE="$2"; JAFRA_AGENT_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --postgres-kind-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-kind-image"; show_usage; exit 2; }
-                POSTGRES_KIND_IMAGE="$2"; POSTGRES_KIND_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --postgres-ocp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-ocp-image"; show_usage; exit 2; }
-                POSTGRES_OCP_IMAGE="$2"; POSTGRES_OCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
             -h|--help)
                 show_usage; exit 0 ;;
             *)
-                log_error "Unknown option: $1"; show_usage; exit 2 ;;
+                # Image override flags are discovered from lib/images.env
+                if images_has_flag "$1"; then
+                    [[ -z "${2:-}" ]] && { log_error "Value required for $1"; show_usage; exit 2; }
+                    images_set_override "$1" "$2"
+                    shift 2
+                else
+                    log_error "Unknown option: $1"; show_usage; exit 2
+                fi ;;
         esac
     done
 }
