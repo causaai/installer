@@ -416,6 +416,8 @@ _registry_abort_wave() {
         _registry_terminate_job "${pid}"
     done
     [[ -n "${_REGISTRY_WAVE_DIR:-}" ]] && rm -rf "${_REGISTRY_WAVE_DIR}"
+    # The re-raised signal skips the EXIT trap, so remove temp files here.
+    if declare -F cleanup_temp_files >/dev/null 2>&1; then cleanup_temp_files; fi
     trap - "${sig}"
     kill -s "${sig}" "$$"
 }
@@ -460,7 +462,7 @@ _registry_run_parallel() {
     _REGISTRY_WAVE_PIDS=()
     local rcs=()
 
-    dir=$(mktemp -d "${TMPDIR:-/tmp}/causa-$$-wave-XXXXXX") || {
+    dir=$(mktemp -d "${_CAUSA_TMPDIR:-${TMPDIR:-/tmp}}/causa-wave-XXXXXX") || {
         log_error "Failed to create a temporary directory for parallel install"
         return 1
     }

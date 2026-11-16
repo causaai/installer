@@ -107,7 +107,7 @@ install_prometheus_mcp_server() {
     write_to_log_file "INFO" "Using Prometheus URL: ${prometheus_url}"
 
     local tmp
-    if ! tmp=$(mktemp /tmp/causa-$$-prom-mcp-XXXXXX.yaml); then
+    if ! tmp=$(make_temp prom-mcp); then
         log_error "Failed to create temporary file for Prometheus MCP manifest"
         return 1
     fi

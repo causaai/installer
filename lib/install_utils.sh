@@ -23,6 +23,86 @@ readonly EXIT_INSTALLATION_FAILED=4
 readonly EXIT_VALIDATION_FAILED=5
 
 ################################################################################
+# Temporary files
+#
+# One private directory per installer run holds every temp file, so a single
+# `rm -rf` at exit (or on INT/TERM) removes them all — including files created
+# inside $( ) command substitutions and parallel wave subshells, where a list
+# kept in a shell variable would be lost.
+#
+#   init_temp_dir        call once, early, in the top-level process
+#   make_temp <label>    prints the path of a new empty file: <dir>/<label>-XXXXXX
+#   cleanup_temp_files   removes the directory (idempotent)
+#
+# The directory is created under ${TMPDIR:-/tmp}; macOS sets TMPDIR to a private
+# per-user folder with a trailing slash, which is stripped.  BSD mktemp only
+# substitutes trailing X's, so never put a suffix such as ".yaml" after them.
+################################################################################
+_CAUSA_TMPDIR=""
+_CAUSA_TMPDIR_OWNER=""
+_CAUSA_CUR_PID=""
+
+# _set_current_shell_pid — sets _CAUSA_CUR_PID to the real PID of the running
+# shell, including inside $( ) and ( ) subshells, where $$ still reports the
+# top-level shell.  Must be called directly (never via $( ), which would fork).
+# bash 4+ has $BASHPID; bash 3.2 (macOS) does not, so ask a child `sh` for its
+# parent PID, writing to a file because capturing it would need a subshell.
+_set_current_shell_pid() {
+    _CAUSA_CUR_PID=""
+    if [[ -n "${BASHPID:-}" ]]; then
+        _CAUSA_CUR_PID="${BASHPID}"
+        return 0
+    fi
+    local probe
+    probe=$(mktemp "${_CAUSA_TMPDIR}/pid-XXXXXX") || return 1
+    sh -c 'echo $PPID' >"${probe}"
+    read -r _CAUSA_CUR_PID <"${probe}" || true
+    rm -f "${probe}"
+    [[ -n "${_CAUSA_CUR_PID}" ]]
+}
+
+init_temp_dir() {
+    [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]] && return 0
+    local base="${TMPDIR:-/tmp}"
+    _CAUSA_TMPDIR=$(mktemp -d "${base%/}/causa-installer-$$-XXXXXX") || {
+        _CAUSA_TMPDIR=""
+        log_error "Failed to create the installer temporary directory under ${base}"
+        return 1
+    }
+    _set_current_shell_pid || {
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+        log_error "Failed to determine the installer shell PID"
+        return 1
+    }
+    _CAUSA_TMPDIR_OWNER="${_CAUSA_CUR_PID}"
+}
+
+make_temp() {
+    local label="${1:-tmp}"
+    if [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]]; then
+        mktemp "${_CAUSA_TMPDIR}/${label}-XXXXXX"
+    else
+        # init_temp_dir was not called (standalone use, tests): still works, but
+        # the file is not removed automatically.
+        mktemp "${TMPDIR:-/tmp}/causa-${label}-XXXXXX"
+    fi
+}
+
+# Removes the directory only from the shell that created it.  A subshell (for
+# example the one running `tmp=$(make_temp label)`) may run an inherited EXIT
+# trap; it must not delete the directory the parent is still using.
+cleanup_temp_files() {
+    if [[ -n "${_CAUSA_TMPDIR}" ]]; then
+        _set_current_shell_pid || return 0
+        [[ "${_CAUSA_CUR_PID}" == "${_CAUSA_TMPDIR_OWNER}" ]] || return 0
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+    fi
+    return 0
+}
+
+################################################################################
 # Error / cleanup
 ################################################################################
 cleanup_on_error() {
@@ -33,6 +113,7 @@ cleanup_on_error() {
             echo -e "${COLOR_GREEN}Check log file for details: ${LOG_FILE}${COLOR_RESET}" > /dev/tty 2>/dev/null || true
         fi
     fi
+    cleanup_temp_files
 }
 
 ################################################################################
@@ -256,13 +337,21 @@ wait_for_deployment() {
     write_to_log_file "INFO" "Waiting for deployment ${name} in ${ns} (timeout: ${timeout}s)..."
     deadline=$(( $(date +%s) + 10#${timeout} ))
 
+    local wait_out last_wait_err=""
     while true; do
-        if ${KUBE_CLI} wait --for=condition=Available \
+        # Intermediate 5s timeouts are expected and not logged; any other
+        # failure (API/authorization/not found) is logged once per distinct message.
+        if wait_out=$(${KUBE_CLI} wait --for=condition=Available \
             deployment/"${name}" \
             -n "${ns}" \
-            --timeout=5s >>"${LOG_FILE}" 2>&1; then
+            --timeout=5s 2>&1); then
             write_to_log_file "SUCCESS" "Deployment ${name} is ready"
             return 0
+        fi
+        if [[ -n "${wait_out}" && "${wait_out}" != *"timed out waiting for the condition"* \
+              && "${wait_out}" != "${last_wait_err}" ]]; then
+            write_to_log_file "WARN" "Deployment ${name}: ${KUBE_CLI} wait failed: ${wait_out}"
+            last_wait_err="${wait_out}"
         fi
 
         reasons=""
@@ -378,7 +467,7 @@ apply_manifest() {
         return 1
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
 
     # Namespace and cluster-type substitution
     sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
@@ -417,7 +506,7 @@ delete_manifest() {
         return 0
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
     sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${manifest}" > "${tmp}"
 
     ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
@@ -430,6 +519,9 @@ delete_manifest() {
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+export -f init_temp_dir
+export -f make_temp
+export -f cleanup_temp_files
 export -f cleanup_on_error
 export -f enable_cleanup_trap
 export -f handle_error

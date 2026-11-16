@@ -57,8 +57,8 @@ _cert_manager_installed() {
 _wait_cert_manager_webhook() {
     local probe deadline
     validate_timeout "CERT_MANAGER_WEBHOOK_TIMEOUT" "${CERT_MANAGER_WEBHOOK_TIMEOUT}" || return 1
-    probe=$(mktemp /tmp/causa-$$-cm-probe-XXXXXX.yaml) || {
-        log_error "mktemp failed — cannot create cert-manager webhook probe file"
+    probe=$(make_temp cm-probe) || {
+        log_error "Failed to create cert-manager webhook probe file"
         return 1
     }
     printf 'apiVersion: cert-manager.io/v1\nkind: Issuer\nmetadata:\n  name: causa-webhook-probe\n  namespace: %s\nspec:\n  selfSigned: {}\n' \

@@ -129,7 +129,7 @@ install_causa() {
     fi
 
     local tmp_mcp_cm
-    if ! tmp_mcp_cm=$(mktemp /tmp/causa-$$-mcp-configmap-XXXXXX.yaml); then
+    if ! tmp_mcp_cm=$(make_temp mcp-configmap); then
         log_error "Failed to create temporary file for Causa MCP ConfigMap"
         return 1
     fi
@@ -166,7 +166,7 @@ install_causa() {
 
         # configmap contains PLACEHOLDER_NAMESPACE and PLACEHOLDER_QUARKUS_METRICS_BASE_URL
         local tmp_cm
-        if ! tmp_cm=$(mktemp /tmp/causa-$$-configmap-XXXXXX.yaml); then
+        if ! tmp_cm=$(make_temp configmap); then
             log_error "Failed to create temporary file for Causa Backend ConfigMap"
             return 1
         fi
@@ -213,7 +213,7 @@ install_causa() {
         # cluster type, and the Quarkus metrics base URL).
         local manifest="${SCRIPT_DIR}/manifests/causa/deployment.yaml"
         local tmp
-        if ! tmp=$(mktemp /tmp/causa-$$-manifest-XXXXXX.yaml); then
+        if ! tmp=$(make_temp manifest); then
             log_error "Failed to create temporary file for Causa Backend manifest"
             return 1
         fi

@@ -104,11 +104,11 @@ fi
 enable_cleanup_trap   # lib/install_utils.sh — log error on unexpected EXIT
 enable_spinner_trap   # lib/logging.sh       — stop spinner cleanly on INT/TERM
 
-# Temp file cleanup — remove stale files from a previous crashed run.
-# Only removes files whose name encodes this process's PID, so a concurrent
-# installer invocation on the same host is not affected.
+# Per-run temp directory — every temp file is created inside it via make_temp
+# and the whole directory is removed on exit, error, INT and TERM.  It is named
+# after this process's PID, so concurrent installer runs do not interfere.
 # ---------------------------------------------------------------------------
-rm -f /tmp/causa-$$-*.yaml
+init_temp_dir || exit 1
 
 # ---------------------------------------------------------------------------
 # Logging initialisation
@@ -119,7 +119,7 @@ initialize_logging() {
         {
             echo "========================================"
             echo "Uninstallation Log"
-            echo "Started: $(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+            echo "Started: $(get_timestamp)"
             echo "========================================"
             echo ""
         } > "${LOG_FILE}"
@@ -276,7 +276,7 @@ main() {
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Component Installation Summary${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo ""
-        for c in "${installed_components[@]}"; do
+        for c in ${installed_components[@]+"${installed_components[@]}"}; do
             echo -e "${COLOR_BOLD_GREEN}${c} ✓${COLOR_RESET}"
         done
         echo ""
