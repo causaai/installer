@@ -17,6 +17,7 @@
 #
 # Semantics
 #   targets     "*" matches any INSTALL_TARGET; otherwise the value must equal it.
+#               Valid target names: kind, openshift, vm.
 #               A module that does not match is not sourced or installed.  It is
 #               listed once in the log file (not on the terminal) in a "Modules
 #               not applicable to target" section.
@@ -123,8 +124,8 @@ _registry_schema_errors() {
                 ( select(($m.required | type) != "boolean")
                   | "modules[\($i)]: \"required\" must be true or false" ),
                 ( select((($m.targets | type) != "array") or (($m.targets | length) == 0)
-                         or (($m.targets | all(. == "*" or . == "kind" or . == "openshift")) | not))
-                  | "modules[\($i)]: \"targets\" must be a non-empty array of: *, kind, openshift" ),
+                         or (($m.targets | all(. == "*" or . == "kind" or . == "openshift" or . == "vm")) | not))
+                  | "modules[\($i)]: \"targets\" must be a non-empty array of: *, kind, openshift, vm" ),
                 ( select((($m.depends_on | type) != "array") or (($m.depends_on | all(isid)) | not))
                   | "modules[\($i)]: \"depends_on\" must be an array of module ids" )
             end

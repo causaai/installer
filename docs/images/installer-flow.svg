@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 440" width="760" height="440" font-family="-apple-system, 'Segoe UI', system-ui, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Installer overview</title>
+  <desc id="d">lib/images.env defines which image each component uses and modules.json defines which components exist and their dependencies. The installer loads both, then installs the modules in waves. Modules inside a wave install in parallel, and a wave starts only after the previous one has finished. A health check runs last.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L10,4 L0,8 z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <rect width="760" height="440" fill="#ffffff"/>
+
+  <!-- arrows -->
+  <g stroke="#57606a" stroke-width="1.5" marker-end="url(#arrow)">
+    <line x1="210" y1="84"  x2="210" y2="120"/>
+    <line x1="550" y1="84"  x2="550" y2="120"/>
+    <line x1="155" y1="176" x2="155" y2="212"/>
+    <line x1="250" y1="254" x2="285" y2="254"/>
+    <line x1="475" y1="254" x2="510" y2="254"/>
+    <line x1="605" y1="296" x2="605" y2="336"/>
+  </g>
+
+  <g text-anchor="middle">
+    <!-- inputs -->
+    <rect x="60" y="20" width="300" height="64" rx="6" fill="#fff4e5" stroke="#d98200" stroke-width="2"/>
+    <text x="210" y="46" font-size="15" font-weight="600" fill="#1f2328">lib/images.env</text>
+    <text x="210" y="66" font-size="12" fill="#57606a">which image each component uses</text>
+
+    <rect x="400" y="20" width="300" height="64" rx="6" fill="#fff4e5" stroke="#d98200" stroke-width="2"/>
+    <text x="550" y="46" font-size="15" font-weight="600" fill="#1f2328">modules.json</text>
+    <text x="550" y="66" font-size="12" fill="#57606a">which components exist and what they depend on</text>
+
+    <!-- installer -->
+    <rect x="60" y="120" width="640" height="56" rx="6" fill="#e8f0fb" stroke="#3b82d4" stroke-width="1.5"/>
+    <text x="380" y="145" font-size="15" font-weight="600" fill="#1f2328">install.sh</text>
+    <text x="380" y="164" font-size="12" fill="#57606a">loads both files, validates them and works out the install order</text>
+
+    <!-- waves -->
+    <rect x="60" y="212" width="190" height="84" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="155" y="240" font-size="15" font-weight="600" fill="#1f2328">Wave 1</text>
+    <text x="155" y="260" font-size="12" fill="#57606a">no dependencies</text>
+    <text x="155" y="278" font-size="12" fill="#57606a">installed in parallel</text>
+
+    <rect x="285" y="212" width="190" height="84" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="380" y="240" font-size="15" font-weight="600" fill="#1f2328">Wave 2</text>
+    <text x="380" y="260" font-size="12" fill="#57606a">depend on wave 1</text>
+    <text x="380" y="278" font-size="12" fill="#57606a">installed in parallel</text>
+
+    <rect x="510" y="212" width="190" height="84" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="1.5"/>
+    <text x="605" y="240" font-size="15" font-weight="600" fill="#1f2328">Wave 3 and later</text>
+    <text x="605" y="260" font-size="12" fill="#57606a">depend on earlier waves</text>
+    <text x="605" y="278" font-size="12" fill="#57606a">installed in parallel</text>
+
+    <!-- health -->
+    <rect x="60" y="336" width="640" height="48" rx="6" fill="#f1ecfb" stroke="#7c5cd8" stroke-width="1.5"/>
+    <text x="380" y="356" font-size="15" font-weight="600" fill="#1f2328">Health check</text>
+    <text x="380" y="374" font-size="12" fill="#57606a">each module can report whether it is healthy</text>
+  </g>
+
+  <text x="60" y="414" font-size="12" fill="#57606a">A wave starts only after the previous wave has finished.</text>
+</svg>
