@@ -144,14 +144,16 @@ _is_openshift_target() {
 }
 
 ################################################################################
-# _check_target_implemented — stops when INSTALL_TARGET has no implementation in
-# this installer. The vm target is accepted here but not implemented; the
-# runtimes installer redefines this function to allow it.
+# _check_target_implemented — vm is accepted so the runtimes installer can build
+# on this one, but is not implemented here. Exits 2 so scripts and CI do not
+# read it as a successful install; the EXIT trap is cleared as nothing failed.
+# The runtimes installer redefines this function to allow vm.
 ################################################################################
 _check_target_implemented() {
     if [[ "${INSTALL_TARGET}" == "vm" ]]; then
-        log_info "Target VM - not yet supported"
-        exit 0
+        log_warn "Target 'vm' is not yet supported by this installer"
+        trap - EXIT
+        exit 2
     fi
 }
 
