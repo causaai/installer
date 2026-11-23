@@ -1,0 +1,30 @@
+# Installer-specific layer on top of the upstream overlay (../../overlays/kind).
+# Everything under base/ and overlays/ is synced verbatim from upstream
+# causaai/causa deployment/kubernetes — put local changes HERE, never there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../overlays/kind
+
+# Keep the legacy `app` / component labels on all objects and pod templates
+# (selectors are NOT touched) so existing NetworkPolicy, alert and
+# `kubectl -l app=causa-backend` selectors keep matching.
+labels:
+  - pairs:
+      app: causa-backend
+      app.kubernetes.io/component: rca-engine
+    includeSelectors: false
+    includeTemplates: true
+
+# Replace upstream's default MCP config with the one listing the MCP servers
+# this installer deploys on kind. Hash suffix disabled so the ConfigMap is
+# always called `causa-mcp-config`.
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: causa-mcp-config
+    behavior: replace
+    files:
+      - mcp.json=mcp.json

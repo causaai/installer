@@ -21,7 +21,7 @@ Waves, parallel install, the target filter, reverse-order uninstall, health chec
 
 | Situation | What to change |
 |---|---|
-| **Causa should call the new MCP server** | Add an entry to `manifests/causa/mcp.json`, and to `manifests/openshift/causa/mcp.json` if the module runs on OpenShift. Nothing generates these files from `modules.json`. See [Register with Causa MCP](#step-5-register-with-causa-mcp-mcp-servers-only) |
+| **Causa should call the new MCP server** | Add an entry to `manifests/causa/installer/kind/mcp.json`, and to `manifests/causa/installer/openshift/mcp.json` if the module runs on OpenShift. Nothing generates these files from `modules.json`. See [Register with Causa MCP](#step-5-register-with-causa-mcp-mcp-servers-only) |
 | **It needs a Kind host port (NodePort)** | Pick a port that is not already used, and edit the port lists in `lib/install_kind_cluster.sh` if it must be reachable from the host |
 | **It needs setup before any module runs** | Cluster-level setup stays in `install.sh`: the Kind cluster, cert-manager and OpenShift monitoring. A module library cannot do this |
 | **Its dependency differs by target** | `depends_on` is one flat list. Give the dependency the right `targets`, and the runner ignores it where it does not apply. See [Dependencies and waves](#dependencies-and-waves) |
@@ -188,12 +188,12 @@ Add an entry to the `modules` array in [`modules.json`](../modules.json).
 
 Skip this step unless the new component is an MCP server that Causa should call.
 
-Causa reads its MCP servers from a ConfigMap named `causa-mcp-config`. [`lib/install_causa.sh`](../lib/install_causa.sh) builds it from one of two files, chosen by `INSTALL_TARGET`:
+Causa reads its MCP servers from a ConfigMap named `causa-mcp-config`. [`lib/install_causa.sh`](../lib/install_causa.sh) renders it from the Kustomize layer `manifests/causa/installer/<target>` for the current `INSTALL_TARGET` (a `configMapGenerator` in that layer reads one of two files):
 
 | Target | File |
 |---|---|
-| `kind` | `manifests/causa/mcp.json` |
-| `openshift` | `manifests/openshift/causa/mcp.json` |
+| `kind` | `manifests/causa/installer/kind/mcp.json` |
+| `openshift` | `manifests/causa/installer/openshift/mcp.json` |
 
 Add an entry under `mcpServers` in each file where the module runs. The OpenShift file leaves out the Kind-only servers (`async-profiler` and `prometheus`) because those modules do not run there. Do the same for a Kind-only module.
 
@@ -234,7 +234,7 @@ Add an entry under `mcpServers` in each file where the module runs. The OpenShif
 # 1. Syntax checks
 bash -n lib/install_demo.sh
 jq . modules.json > /dev/null
-jq . manifests/causa/mcp.json manifests/openshift/causa/mcp.json > /dev/null   # if you edited them
+jq . manifests/causa/installer/kind/mcp.json manifests/causa/installer/openshift/mcp.json > /dev/null   # if you edited them
 
 # 2. Registry validation and wave walk-through, no cluster changes
 ./install.sh --dry-run --target kind
@@ -291,7 +291,7 @@ Limits:
 - [ ] Both functions return `0` on a dry run
 - [ ] `modules.json` has an entry with valid `targets`, `required` and `depends_on`
 - [ ] `lib/images.env` has an entry with a comment on the line above it (if there is an image)
-- [ ] The new MCP server is in `manifests/causa/mcp.json`, and in `manifests/openshift/causa/mcp.json` if it runs on OpenShift (if Causa should call it)
+- [ ] The new MCP server is in `manifests/causa/installer/kind/mcp.json`, and in `manifests/causa/installer/openshift/mcp.json` if it runs on OpenShift (if Causa should call it)
 - [ ] The NodePort is unused, and `lib/install_kind_cluster.sh` is updated if it must be host-visible (if it needs one)
 - [ ] `./install.sh --dry-run` passes for both `kind` and `openshift`
 - [ ] `install.sh` and `lib/validator.sh` are unchanged

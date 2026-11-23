@@ -100,13 +100,13 @@ lib/
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
   kubernetes_mcp/             # Kubernetes MCP Server (NodePort 30000)
-  causa/                      # Causa (NodePort 30001, kind)
+  causa/                      # Causa — Kustomize layout mirroring upstream causaai/causa (base, overlays — upstream-synced; installer — local changes + mcp.json)
   jafra/                      # Jafra Ecosystem (kind only)
   jafra_mcp/                  # Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
   causa_mcp/                  # Causa MCP Server (NodePort 30005)
   postgres/                   # PostgreSQL — kind Deployment + OpenShift CNPG manifests
-  openshift/                  # OpenShift-specific manifests (Routes, Causa, monitoring)
+  openshift/                  # OpenShift-specific manifests (Routes, monitoring)
   prometheus/                 # PrometheusRule (applied on both targets)
 ```
 
