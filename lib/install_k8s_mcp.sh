@@ -3,7 +3,7 @@
 ################################################################################
 # Kubernetes MCP Server — Installation Functions
 #
-# Deploys the Kubernetes MCP Server from manifests/k8s_mcp/deployment.yaml.
+# Deploys the Kubernetes MCP Server from manifests/kubernetes_mcp/deployment.yaml.
 ################################################################################
 
 # Source guard
