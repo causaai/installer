@@ -28,3 +28,22 @@ configMapGenerator:
     behavior: replace
     files:
       - mcp.json=mcp.json
+
+patches:
+  # Keep the 2Gi memory limit from earlier installer releases (upstream OpenShift overlay sets 512Mi)
+  - target:
+      kind: Deployment
+      name: causa-backend
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: causa-backend
+      spec:
+        template:
+          spec:
+            containers:
+              - name: causa-backend
+                resources:
+                  limits:
+                    memory: 2Gi
