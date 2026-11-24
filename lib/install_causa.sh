@@ -184,7 +184,22 @@ uninstall_causa() {
         return 1
     fi
 
-    # Delete every rendered resource
+    # Delete the Deployment first and wait for its pods to be gone before
+    # removing the ConfigMap it mounts as a volume.  If deletion is interrupted
+    # after the ConfigMap is deleted but before the Deployment is gone,
+    # replacement pods cannot mount the missing ConfigMap and the backend is
+    # left in a broken state.
+    if ! ${KUBE_CLI} delete deployment/causa-backend \
+            -n "${INSTALL_NAMESPACE}" \
+            --ignore-not-found=true \
+            --wait=true \
+            >>"${LOG_FILE}" 2>&1; then
+        rm -f "${tmp}"
+        log_error "Failed to delete causa-backend Deployment"
+        return 1
+    fi
+
+    # Now safe to remove the remaining resources (ConfigMap, Service, etc.)
     if ! ${KUBE_CLI} delete -n "${INSTALL_NAMESPACE}" -f "${tmp}" \
             --ignore-not-found=true >>"${LOG_FILE}" 2>&1; then
         rm -f "${tmp}"
