@@ -58,6 +58,51 @@ _validate_causa_backend_ready() {
 }
 
 ################################################################################
+# _generate_causa_mcp_manifest
+# Dynamically adapts upstream manifests to the target environment without
+# modifying the raw upstream files on disk.
+################################################################################
+_generate_causa_mcp_manifest() {
+    local src="$1"
+    local ns="$2"
+    local img="$3"
+    local target="$4"
+    local out="$5"
+
+    if [[ "${target}" == "openshift" ]]; then
+        sed -e "s|image: .*|image: ${img}|g" \
+            -e "s|http://causa-backend:[0-9]*|http://causa-backend.${ns}.svc.cluster.local:8080|g" \
+            -e "s|http://causa-backend\.[^:]*:8080|http://causa-backend.${ns}.svc.cluster.local:8080|g" \
+            -e "s|value: \"openshift\"|value: \"${target}\"|g" \
+            "${src}" > "${out}"
+    else
+        # For kind/k8s: strip standalone kind: Namespace document, parameterize namespace, image, backend url, cluster name
+        awk '
+            BEGIN { doc="" }
+            /^---/ {
+                if (doc !~ /kind:[[:space:]]*Namespace/) {
+                    printf "%s", doc
+                }
+                doc = "---\n"
+                next
+            }
+            { doc = doc $0 "\n" }
+            END {
+                if (doc !~ /kind:[[:space:]]*Namespace/) {
+                    printf "%s", doc
+                }
+            }
+        ' "${src}" | sed \
+            -e "s/namespace: causa/namespace: ${ns}/g" \
+            -e "s|image: .*|image: ${img}|g" \
+            -e "s|imagePullPolicy: Never|imagePullPolicy: IfNotPresent|g" \
+            -e "s|http://causa-backend[^\"']*|http://causa-backend.${ns}.svc.cluster.local:8080|g" \
+            -e "s|value: \"kind\"|value: \"${target}\"|g" \
+            > "${out}"
+    fi
+}
+
+################################################################################
 # install_causa_mcp
 ################################################################################
 install_causa_mcp() {
@@ -72,28 +117,40 @@ install_causa_mcp() {
         return 1
     fi
 
-    local manifest="${SCRIPT_DIR}/manifests/causa_mcp/deployment.yaml"
+    local manifest
+    if _is_openshift_target; then
+        manifest="${SCRIPT_DIR}/manifests/causa_mcp/causa-mcp-server-openshift.yaml"
+    else
+        manifest="${SCRIPT_DIR}/manifests/causa_mcp/causa-mcp-server.yaml"
+    fi
+
     local img="${CAUSA_MCP_IMAGE}"
+    local ns="${INSTALL_NAMESPACE}"
+    local target="${INSTALL_TARGET:-kind}"
 
     write_to_log_file "INFO" "Using image: ${img}"
+    write_to_log_file "INFO" "Applying Causa MCP manifest: ${manifest}"
 
-    if ! apply_manifest "${manifest}" "${INSTALL_NAMESPACE}" \
-        "image: .*causa-mcp.*" "${img}"; then
+    local tmp
+    tmp=$(make_temp causa-mcp) || { log_error "Failed to create temp file"; return 1; }
+
+    _generate_causa_mcp_manifest "${manifest}" "${ns}" "${img}" "${target}" "${tmp}"
+
+    local rc=0
+    ${KUBE_CLI} apply -f "${tmp}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || rc=$?
+    rm -f "${tmp}"
+
+    if [[ ${rc} -ne 0 ]]; then
         log_error "Failed to apply Causa MCP manifest"
         return 1
     fi
 
-    wait_for_deployment "causa-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
+    wait_for_deployment "causa-mcp" "${ns}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     if _is_openshift_target; then
-        local route="${SCRIPT_DIR}/manifests/openshift/causa-mcp-route.yaml"
-        if ! apply_manifest "${route}" "${INSTALL_NAMESPACE}"; then
-            log_error "Failed to apply Causa MCP Server Route"
-            return 1
-        fi
         write_to_log_file "INFO" "OpenShift Route applied for Causa MCP Server"
     else
-        write_to_log_file "INFO" "Host access: kubectl port-forward svc/causa-mcp 30005:8081 -n ${INSTALL_NAMESPACE}"
+        write_to_log_file "INFO" "Host access: kubectl port-forward svc/causa-mcp 30005:8081 -n ${ns}"
     fi
 
     write_to_log_file "SUCCESS" "Causa MCP Server installed"
@@ -111,12 +168,24 @@ uninstall_causa_mcp() {
         return 0
     fi
 
-    local manifest="${SCRIPT_DIR}/manifests/causa_mcp/deployment.yaml"
-    delete_manifest "${manifest}" "${INSTALL_NAMESPACE}"
-
+    local manifest
     if _is_openshift_target; then
-        delete_manifest "${SCRIPT_DIR}/manifests/openshift/causa-mcp-route.yaml" "${INSTALL_NAMESPACE}"
+        manifest="${SCRIPT_DIR}/manifests/causa_mcp/causa-mcp-server-openshift.yaml"
+    else
+        manifest="${SCRIPT_DIR}/manifests/causa_mcp/causa-mcp-server.yaml"
     fi
+
+    local ns="${INSTALL_NAMESPACE}"
+    local target="${INSTALL_TARGET:-kind}"
+    local img="${CAUSA_MCP_IMAGE}"
+
+    local tmp
+    tmp=$(make_temp causa-mcp) || { log_error "Failed to create temp file"; return 1; }
+
+    _generate_causa_mcp_manifest "${manifest}" "${ns}" "${img}" "${target}" "${tmp}"
+
+    ${KUBE_CLI} delete -f "${tmp}" -n "${ns}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
+    rm -f "${tmp}"
 
     write_to_log_file "SUCCESS" "Causa MCP Server uninstalled"
     return 0
