@@ -99,7 +99,7 @@ lib/
   install_causa.sh            # Causa
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
-  k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
+  kubernetes_mcp/             # Kubernetes MCP Server (NodePort 30000)
   causa/                      # Causa (NodePort 30001, kind)
   jafra/                      # Jafra Ecosystem (kind only)
   jafra_mcp/                  # Jafra MCP Server (NodePort 30003, kind only)

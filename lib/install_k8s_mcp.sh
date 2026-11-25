@@ -3,7 +3,7 @@
 ################################################################################
 # Kubernetes MCP Server — Installation Functions
 #
-# Deploys the Kubernetes MCP Server from manifests/k8s_mcp_server.yaml.
+# Deploys the Kubernetes MCP Server from manifests/kubernetes_mcp/deployment.yaml.
 ################################################################################
 
 # Source guard
@@ -25,7 +25,7 @@ export SCRIPT_DIR INSTALL_NAMESPACE KUBE_CLI DRY_RUN K8S_MCP_SERVER_IMAGE
 
 # _k8s_mcp_manifest — returns the manifest path
 _k8s_mcp_manifest() {
-    echo "${SCRIPT_DIR}/manifests/k8s_mcp_server.yaml"
+    echo "${SCRIPT_DIR}/manifests/kubernetes_mcp/deployment.yaml"
 }
 
 ################################################################################
