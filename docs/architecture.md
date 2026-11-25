@@ -32,7 +32,7 @@ manifests/
   jafra/                                ← Jafra Ecosystem (kind only)
   jafra_mcp/deployment.yaml             ← Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/deployment.yaml           ← Quarkus MCP Server (NodePort 30004)
-  causa_mcp/deployment.yaml             ← Causa MCP Server (NodePort 30005)
+  causa_mcp/                            ← Causa MCP Server (causa-mcp-server.yaml for kind, causa-mcp-server-openshift.yaml for openshift)
   postgres/                             ← kind Deployment + OpenShift CNPG operator manifests
   openshift/                            ← OpenShift-specific manifests (Routes, Causa Backend, monitoring)
   prometheus/                           ← PrometheusRule (applied on both targets)
