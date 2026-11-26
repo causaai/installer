@@ -1,0 +1,72 @@
+# Template processed via envsubst — do not apply directly; use `make deploy`.
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: causa
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: causa-mcp
+  namespace: causa
+  labels:
+    app: causa-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: causa-mcp
+  template:
+    metadata:
+      labels:
+        app: causa-mcp
+    spec:
+      containers:
+        - name: causa-mcp
+          image: causa-mcp:${IMAGE_TAG}
+          imagePullPolicy: Never        # Kind local registry — no remote pull
+          ports:
+            - containerPort: 8081
+          env:
+            - name: CAUSA_ENGINE_URL
+              value: "http://causa-backend.diagnostics-tool.svc.cluster.local:8080"
+            - name: CAUSA_CLUSTER_NAME
+              value: "kind"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: causa-mcp
+  namespace: causa
+spec:
+  selector:
+    app: causa-mcp
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
