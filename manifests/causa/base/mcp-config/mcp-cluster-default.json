@@ -1,0 +1,293 @@
+{
+  "mcpServers": {
+    "kubernetes": {
+      "type": "streamable-http",
+      "url": "http://kubernetes-mcp-server:8080/mcp",
+      "headers": {},
+      "optional": false,
+      "alwaysAllow": ["pods_get", "pods_log", "events_list"],
+      "healthCheck": { "url": "http://kubernetes-mcp-server:8080/healthz", "timeoutMs": 5000 },
+      "timeoutMs": 5000,
+      "description": "Kubernetes MCP — live pod status, events, and container logs from the cluster API",
+      "tools": [
+        {
+          "name": "pods_get",
+          "contextKey": "POD_STATUS",
+          "description": "Current pod phase, container statuses, restart counts, and resource requests/limits.",
+          "arguments": { "name": "${podName}", "namespace": "${namespace}" }
+        },
+        {
+          "name": "events_list",
+          "contextKey": "POD_EVENTS",
+          "description": "Kubernetes events for the pod (Type, Reason, Message, Timestamp).",
+          "arguments": { "namespace": "${namespace}", "fieldSelector": "involvedObject.name=${podName}" }
+        },
+        {
+          "name": "pods_log",
+          "contextKey": "POD_LOGS",
+          "description": "Current container logs, last 25 lines.",
+          "arguments": { "name": "${podName}", "namespace": "${namespace}", "container": "${containerName}", "previous": "false", "tailLines": "25" }
+        },
+        {
+          "name": "pods_log",
+          "contextKey": "POD_LOGS_PREVIOUS",
+          "description": "Previous (crashed/restarted) container logs, last 25 lines.",
+          "arguments": { "name": "${podName}", "namespace": "${namespace}", "container": "${containerName}", "previous": "true", "tailLines": "25" }
+        }
+      ]
+    },
+    "kruize": {
+      "type": "streamable-http",
+      "url": "http://kruize-mcp-server-service:8080/mcp",
+      "headers": {},
+      "optional": false,
+      "alwaysAllow": ["getCostOptimizedRecommendations", "getPerformanceOptimizedRecommendations"],
+      "healthCheck": { "url": "http://kruize-mcp-server-service:8080/q/health/ready", "timeoutMs": 10000 },
+      "timeoutMs": 10000,
+      "description": "Kruize MCP — CPU and memory resource optimisation recommendations",
+      "tools": [
+        {
+          "name": "getCostOptimizedRecommendations",
+          "contextKey": "KRUIZE_COST_RECOMMENDATIONS",
+          "description": "Container resource-request/limit suggestions optimised for cost.",
+          "arguments": { "containerName": "${containerName}", "namespace": "${namespace}" }
+        },
+        {
+          "name": "getPerformanceOptimizedRecommendations",
+          "contextKey": "KRUIZE_PERFORMANCE_RECOMMENDATIONS",
+          "description": "Container resource-request/limit suggestions optimised for performance.",
+          "arguments": { "containerName": "${containerName}", "namespace": "${namespace}" }
+        }
+      ]
+    },
+    "cryostat": {
+      "type": "streamable-http",
+      "url": "http://cryostat-mcp-cryostat-k8s-multi-mcp:8080/mcp",
+      "headers": {},
+      "optional": true,
+      "alwaysAllow": ["getDiscoveryTree", "getAnalysisReport"],
+      "healthCheck": { "url": "http://cryostat-mcp-cryostat-k8s-multi-mcp:8080/q/health/ready", "timeoutMs": 15000 },
+      "timeoutMs": 60000,
+      "metadata": { "analysisLookbackMinutes": 15 },
+      "description": "Cryostat MCP — confirm the pod in the discovery tree, then fetch automated JFR analysis for the alert time window",
+      "tools": [
+        {
+          "name": "getDiscoveryTree",
+          "contextKey": "CRYOSTAT_DISCOVERY",
+          "description": "Discovery tree for the application namespace. The report is called only when this tree contains the alert namespace and pod.",
+          "arguments": { "namespace": "${namespace}", "mergeRealms": "true" }
+        },
+        {
+          "name": "getAnalysisReport",
+          "contextKey": "CRYOSTAT_ANALYSIS",
+          "description": "Automated analysis rules for archived JFR recordings that intersect the alert time window.",
+          "arguments": {
+            "namespace": "${namespace}",
+            "podName": "${podName}",
+            "fromTimestamp": "${fromTimestamp}",
+            "toTimestamp": "${toTimestamp}"
+          }
+        }
+      ]
+    },
+    "instana": {
+      "type": "streamable-http",
+      "url": "http://instana-mcp-server:8080/mcp",
+      "headers": {},
+      "optional": true,
+      "alwaysAllow": ["manage_events", "manage_releases", "manage_applications", "manage_infrastructure", "manage_synthetics", "manage_slo"],
+      "healthCheck": { "url": "http://instana-mcp-server:8080/mcp", "timeoutMs": 10000 },
+      "timeoutMs": 30000,
+      "metadata": { "timestampPrecision": "seconds" },
+      "description": "Instana MCP — K8s events, Golden Signals, JVM snapshots, infra metrics, releases, SLO reports, synthetic tests from IBM Instana APM",
+      "tools": [
+        {
+          "name": "manage_events",
+          "contextKey": "INSTANA_K8S_EVENTS",
+          "description": "Kubernetes events for the alert pod only (1h window ending at the alert; filtered to the pod client-side)",
+          "arguments": {
+            "operation": "get_kubernetes_info_events",
+            "params": { "from_time": "${alertTimestampMinus1h}", "to_time": "${alertTimestamp}", "max_events": 500 }
+          }
+        },
+        {
+          "name": "manage_releases",
+          "contextKey": "INSTANA_RELEASES",
+          "description": "Recent deployment releases correlated with the service",
+          "arguments": {
+            "operation": "get_all_releases",
+            "params": { "name_filter": "${containerName}", "page_number": 1, "page_size": 10 }
+          }
+        },
+        {
+          "name": "manage_applications",
+          "contextKey": "INSTANA_SERVICE_METRICS",
+          "description": "Service-level Golden Signals (calls, errors, latency)",
+          "arguments": {
+            "resource_type": "metrics",
+            "operation": "get_grouped_calls_metrics",
+            "params": {
+              "group": { "groupbyTag": "service.name", "groupbyTagEntity": "DESTINATION" },
+              "metrics": [
+                { "metric": "calls", "aggregation": "SUM" },
+                { "metric": "erroneousCalls", "aggregation": "SUM" },
+                { "metric": "errors", "aggregation": "MEAN" },
+                { "metric": "latency", "aggregation": "P95" },
+                { "metric": "latency", "aggregation": "MEAN" }
+              ],
+              "tag_filter_expression": {
+                "type": "TAG_FILTER", "name": "service.name",
+                "operator": "EQUALS", "entity": "DESTINATION", "value": "${containerName}"
+              },
+              "time_frame": { "windowSize": 86400000 }
+            }
+          }
+        },
+        {
+          "name": "manage_applications",
+          "contextKey": "INSTANA_ENDPOINT_METRICS",
+          "description": "Per-endpoint call/error/latency breakdown",
+          "arguments": {
+            "resource_type": "metrics",
+            "operation": "get_grouped_calls_metrics",
+            "params": {
+              "group": { "groupbyTag": "endpoint.name", "groupbyTagEntity": "DESTINATION" },
+              "metrics": [
+                { "metric": "calls", "aggregation": "SUM" },
+                { "metric": "erroneousCalls", "aggregation": "SUM" },
+                { "metric": "errors", "aggregation": "MEAN" },
+                { "metric": "latency", "aggregation": "P95" },
+                { "metric": "latency", "aggregation": "MEAN" }
+              ],
+              "tag_filter_expression": {
+                "type": "TAG_FILTER", "name": "service.name",
+                "operator": "EQUALS", "entity": "DESTINATION", "value": "${containerName}"
+              },
+              "time_frame": { "windowSize": 86400000 }
+            }
+          }
+        },
+        {
+          "name": "manage_infrastructure",
+          "contextKey": "INSTANA_INFRA_METRIC_CATALOG",
+          "description": "Available JVM infrastructure metrics",
+          "arguments": {
+            "resource_type": "catalog",
+            "operation": "get_metrics",
+            "params": { "plugin": "jvmRuntimePlatform" }
+          }
+        },
+        {
+          "name": "manage_infrastructure",
+          "contextKey": "INSTANA_SNAPSHOTS",
+          "description": "Infrastructure snapshots for the alert pod's JVM (pod name AND namespace)",
+          "arguments": {
+            "resource_type": "resources",
+            "operation": "get_snapshots",
+            "params": {
+              "plugin": "jvmRuntimePlatform",
+              "query": "entity.kubernetes.pod.name:\"${podName}\" AND entity.kubernetes.namespace:\"${namespace}\"",
+              "size": 5
+            }
+          }
+        },
+        {
+          "name": "manage_infrastructure",
+          "contextKey": "INSTANA_SNAPSHOT_DETAIL",
+          "description": "JVM command-line args, GC config, memory pools (chained from get_snapshots)",
+          "arguments": {
+            "resource_type": "resources",
+            "operation": "get_snapshot",
+            "params": { "snapshot_id": "${snapshotId}" }
+          }
+        },
+        {
+          "name": "manage_infrastructure",
+          "contextKey": "INSTANA_JVM_METRICS",
+          "description": "JVM time-series metrics (heap, metaspace, threads)",
+          "arguments": {
+            "resource_type": "analyze",
+            "operation": "get_entities",
+            "params": {
+              "payload": {
+                "type": "jvmRuntimePlatform",
+                "metrics": [
+                  { "metric": "memory.used", "granularity": 60000, "aggregation": "MAX" },
+                  { "metric": "pools.Metaspace", "granularity": 60000, "aggregation": "MAX" },
+                  { "metric": "threads.waiting", "granularity": 60000, "aggregation": "SUM" }
+                ],
+                "tagFilterExpression": {
+                  "type": "EXPRESSION", "logicalOperator": "AND",
+                  "elements": [
+                    {
+                      "type": "TAG_FILTER", "entity": "NOT_APPLICABLE",
+                      "name": "kubernetes.namespace.name", "operator": "EQUALS",
+                      "value": "${namespace}"
+                    },
+                    {
+                      "type": "TAG_FILTER", "entity": "NOT_APPLICABLE",
+                      "name": "kubernetes.pod.name", "operator": "EQUALS",
+                      "value": "${podName}"
+                    }
+                  ]
+                },
+                "timeFrame": { "windowSize": 3600000 },
+                "pagination": { "retrievalSize": 5 }
+              }
+            }
+          }
+        },
+        {
+          "name": "manage_infrastructure",
+          "contextKey": "INSTANA_INFRA_ALERTS",
+          "description": "Active infrastructure smart alert configurations that apply to the alert pod (filtered client-side)",
+          "arguments": {
+            "resource_type": "alert_config",
+            "operation": "find_active",
+            "params": { "page_size": 1000 }
+          }
+        },
+        {
+          "name": "manage_synthetics",
+          "contextKey": "INSTANA_SYNTHETIC_TESTS",
+          "description": "Synthetic test pass/fail summary",
+          "arguments": {
+            "resource_type": "test_playback",
+            "operation": "get_test_summary_list",
+            "params": {
+              "payload": {
+                "metrics": [{ "metric": "synthetic.metricsStatus", "aggregation": "MEAN", "granularity": 600 }],
+                "pagination": { "page": 1, "pageSize": 10 },
+                "timeFrame": { "windowSize": 86400000 }
+              }
+            }
+          }
+        },
+        {
+          "name": "manage_slo",
+          "contextKey": "INSTANA_SLO_CONFIGS",
+          "description": "Discover all configured SLO definitions (chaining source for SLO report)",
+          "arguments": {
+            "resource_type": "configuration",
+            "operation": "get_all",
+            "params": { "page_size": 10, "query": "${containerName}" }
+          }
+        },
+        {
+          "name": "manage_slo",
+          "contextKey": "INSTANA_SLO_REPORT",
+          "description": "SLO compliance report and error budget status (chained from get_all)",
+          "arguments": {
+            "resource_type": "report",
+            "operation": "get",
+            "params": {
+              "slo_id": "${sloId}",
+              "var_from": "${alertTimestampMinus15m}",
+              "to": "${alertTimestamp}"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: causa-backend
+  labels:
+    app.kubernetes.io/name: causa-backend
+spec:
+  host: ""  # OpenShift will auto-generate
+  to:
+    kind: Service
+    name: causa-backend
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
