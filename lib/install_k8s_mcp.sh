@@ -3,12 +3,15 @@
 ################################################################################
 # Kubernetes MCP Server — Installation Functions
 #
-# Deploys the Kubernetes MCP Server from manifests/k8s_mcp_server.yaml.
+# Deploys the Kubernetes MCP Server from manifests/kubernetes_mcp/deployment.yaml.
 ################################################################################
 
 # Source guard
 if [[ -n "${INSTALL_K8S_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_K8S_MCP_LIB_LOADED=1
+
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
 
 # ---------------------------------------------------------------------------
 # Global variable defaults — safe to source standalone or from other entrypoints
@@ -22,7 +25,7 @@ export SCRIPT_DIR INSTALL_NAMESPACE KUBE_CLI DRY_RUN K8S_MCP_SERVER_IMAGE
 
 # _k8s_mcp_manifest — returns the manifest path
 _k8s_mcp_manifest() {
-    echo "${SCRIPT_DIR}/manifests/k8s_mcp_server.yaml"
+    echo "${SCRIPT_DIR}/manifests/kubernetes_mcp/deployment.yaml"
 }
 
 ################################################################################
@@ -48,10 +51,7 @@ install_kubernetes_mcp_server() {
         return 1
     fi
 
-    if ! wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" 300; then
-        log_error "Kubernetes MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "kubernetes-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     # On OpenShift, also apply the Route so the MCP server is externally reachable.
     if _is_openshift_target; then
@@ -91,5 +91,13 @@ uninstall_kubernetes_mcp_server() {
     return 0
 }
 
+################################################################################
+# k8s_mcp_health — post-install health check used by registry_check_health
+################################################################################
+k8s_mcp_health() {
+    check_deployment_healthy "kubernetes-mcp-server"
+}
+
 export -f install_kubernetes_mcp_server
 export -f uninstall_kubernetes_mcp_server
+export -f k8s_mcp_health

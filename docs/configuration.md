@@ -28,6 +28,7 @@ For installation steps, see the [Installation Guide](installation.md).
 | `DRY_RUN` | `false` | Set to `true` to validate without installing |
 | `TERMINATE` | `false` | Set to `true` to uninstall |
 | `DELETE_CLUSTER` | `false` | Set to `true` to delete cluster on terminate (kind only) |
+| `CNPG_DELETE_CRDS` | `false` | Set to `true` to also delete the cluster-wide CloudNativePG CRDs (`*.cnpg.io`) on OpenShift uninstall. This removes every CNPG resource in all namespaces, so use it only when this installer owns the operator |
 
 ### Kind-specific
 
@@ -51,6 +52,21 @@ The following two endpoints are derived automatically from `INSTALL_NAMESPACE` a
 | `CAUSA_MCP_ASYNC_PROFILER_ENDPOINT` | `http://jafra-mcp.<namespace>.svc.cluster.local:8083` |
 | `JAFRA_ANALYZER_URL` | `http://jafra-analyzer.<namespace>.svc.cluster.local:8080` |
 
+### Wait timeouts
+
+Each component waits for its workload to become ready before the installer moves on. All values are in seconds and must be whole numbers from `1` to `99999`; any other value (non-numeric, zero, negative, or more than five digits) is rejected and the wait fails with an error. Set them as environment variables before running `install.sh`.
+
+| Variable | Default | Applies to |
+|---|---|---|
+| `CAUSA_DEPLOY_TIMEOUT` | `600` | Causa Backend Deployment to become Available |
+| `MCP_DEPLOY_TIMEOUT` | `300` | Deployment of each MCP server: Causa MCP, Kubernetes MCP, Quarkus MCP, Prometheus MCP and Jafra MCP (one value shared by all five) |
+| `JAFRA_DEPLOY_TIMEOUT` | `180` | Jafra Controller and Jafra Analyzer Deployments (Kind only) |
+| `POSTGRES_DEPLOY_TIMEOUT` | `180` | PostgreSQL Deployment (Kind) |
+| `PROMETHEUS_DEPLOY_TIMEOUT` | `300` | `helm install` / `helm upgrade` of kube-prometheus-stack (Kind only) |
+| `PROMETHEUS_READY_TIMEOUT` | `300` | Prometheus StatefulSet of the kube-prometheus-stack release to be created and ready, after Helm returns (Kind only) |
+| `CERT_MANAGER_DEPLOY_TIMEOUT` | `180` | cert-manager Deployments to roll out (Kind only) |
+| `CERT_MANAGER_WEBHOOK_TIMEOUT` | `180` | cert-manager webhook to accept requests after rollout (Kind only) |
+
 ## Image overrides
 
 Default images are defined in [`lib/images.env`](../lib/images.env) — the single source of truth for all image defaults.
@@ -61,6 +77,8 @@ Priority order (highest to lowest):
 3. Value in `lib/images.env`
 
 ### CLI flags
+
+Flags are generated from the variable names in `lib/images.env` (`FOO_BAR_IMAGE` → `--foo-bar-image`); run `./install.sh --help` for the current list. To add one, add a `*_IMAGE` entry to `lib/images.env` — no other file changes.
 
 | Flag | Component | Target |
 |---|---|---|
@@ -76,6 +94,39 @@ Priority order (highest to lowest):
 | `--jafra-agent-image IMAGE` | Jafra Agent | kind only |
 
 ### Environment variables
+
+Any image can be set by exporting its variable before running the installer — no flag needed:
+
+```bash
+export CAUSA_MCP_IMAGE=quay.io/causaai/causa-mcp:v0.1.0
+./install.sh
+
+# or for a single run
+CAUSA_MCP_IMAGE=quay.io/causaai/causa-mcp:v0.1.0 ./install.sh
+```
+
+Precedence: CLI flag > exported variable > default in `lib/images.env`. The exported value is validated like any other (see [Image validation](#image-validation)).
+
+**A variable only takes effect if it is declared in `lib/images.env`.** The installer discovers images from that file, so an exported `*_IMAGE` variable that is not declared there is ignored — it is not validated and has no CLI flag. To pass a new image variable:
+
+1. Declare it once in `lib/images.env`, with a comment above it (used for the `--help` text):
+
+   ```bash
+   # Widget Service
+   WIDGET_SERVICE_IMAGE=${WIDGET_SERVICE_IMAGE:-quay.io/org/widget:1.0.0}
+   ```
+
+2. Export it (or pass `--widget-service-image`):
+
+   ```bash
+   WIDGET_SERVICE_IMAGE=quay.io/org/widget:2.0.0 ./install.sh
+   ```
+
+3. Read `${WIDGET_SERVICE_IMAGE}` in the component's `lib/install_*.sh`.
+
+The variable name must match `^[A-Z][A-Z0-9_]*_IMAGE`, and always keep the `${VAR:-default}` form — a plain `VAR=value` would override the exported value.
+
+Variables currently declared:
 
 | Variable | Component | Target |
 |---|---|---|

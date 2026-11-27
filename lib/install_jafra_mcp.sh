@@ -10,6 +10,9 @@
 if [[ -n "${INSTALL_JAFRA_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_JAFRA_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 _jafra_mcp_not_released() {
     [[ -z "${JAFRA_MCP_IMAGE:-}" ]]
 }
@@ -32,7 +35,7 @@ install_jafra_mcp() {
 
     if _jafra_mcp_not_released; then
         log_warn "Jafra MCP Server: image not yet released — skipping (set JAFRA_MCP_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     if ! create_namespace; then return 1; fi
@@ -49,10 +52,7 @@ install_jafra_mcp() {
         return 1
     fi
 
-    if ! wait_for_deployment "jafra-mcp" "${INSTALL_NAMESPACE}" 300; then
-        log_error "Jafra MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "jafra-mcp" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Jafra MCP Server installed"
     write_to_log_file "INFO" "NodePort: localhost:30003"
@@ -80,5 +80,13 @@ uninstall_jafra_mcp() {
     return 0
 }
 
+################################################################################
+# jafra_mcp_health — post-install health check used by registry_check_health
+################################################################################
+jafra_mcp_health() {
+    check_deployment_healthy "jafra-mcp"
+}
+
 export -f install_jafra_mcp
 export -f uninstall_jafra_mcp
+export -f jafra_mcp_health

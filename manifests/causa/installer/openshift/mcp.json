@@ -42,7 +42,7 @@
       "headers": {},
       "optional": false,
       "alwaysAllow": ["fetch_raw_metrics_from_endpoint"],
-      "healthCheck": { "url": "http://mcp-metrics:8080/healthz", "timeoutMs": 10000 },
+      "healthCheck": { "url": "http://mcp-metrics:8080/q/health", "timeoutMs": 10000 },
       "timeoutMs": 10000,
       "metadata": { "metricsBaseUrl": "http://mcp-metrics:8080/q/metrics" },
       "description": "Quarkus MCP — raw Prometheus-format metrics scraped from the target application's metrics endpoint",

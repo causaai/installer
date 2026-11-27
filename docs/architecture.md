@@ -10,7 +10,8 @@ The installer is a modular Bash project. A single entry point orchestrates the d
 ```
 install.sh                              ← entry point, orchestrates everything
 lib/
-  images.env                            ← default image tags, sourced at startup
+  images.env                            ← default image tags — the only place images are declared
+  images.sh                             ← derives vars, flags, --help and validation from images.env
   logging.sh                            ← logging utilities and spinner
   install_utils.sh                      ← shared helpers, exit codes, error handling
   validator.sh                          ← pre-flight checks (tools, container runtime, cluster)
@@ -26,14 +27,14 @@ lib/
   install_causa.sh                      ← Causa Backend
   install_causa_mcp.sh                  ← Causa MCP Server
 manifests/
-  k8s_mcp_server.yaml                   ← Kubernetes MCP Server (NodePort 30000)
-  causa/deployment.yaml                 ← Causa Backend (NodePort 30001, kind)
+  kubernetes_mcp/deployment.yaml        ← Kubernetes MCP Server (NodePort 30000)
+  causa/                                ← Causa Backend — Kustomize (base/ + overlays/ synced verbatim from upstream causaai/causa; installer/{kind,openshift}/ holds local changes + mcp.json)
   jafra/                                ← Jafra Ecosystem (kind only)
   jafra_mcp/deployment.yaml             ← Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/deployment.yaml           ← Quarkus MCP Server (NodePort 30004)
-  causa_mcp/deployment.yaml             ← Causa MCP Server (NodePort 30005)
+  causa_mcp/                            ← Causa MCP Server (causa-mcp-server.yaml for kind, causa-mcp-server-openshift.yaml for openshift)
   postgres/                             ← kind Deployment + OpenShift CNPG operator manifests
-  openshift/                            ← OpenShift-specific manifests (Routes, Causa Backend, monitoring)
+  openshift/                            ← OpenShift-specific manifests (Routes, monitoring)
   prometheus/                           ← PrometheusRule (applied on both targets)
 ```
 
@@ -47,6 +48,64 @@ When `install.sh` is run:
 4. Runs pre-flight validation (container runtime, tools, cluster access)
 5. Deploys components in sequence (see [Installation order](installation.md#installation-order))
 6. Runs post-installation health check and prints the access summary
+
+## Module registry (`modules.json`)
+
+Deployable components are declared in [`modules.json`](../modules.json) and run by [`lib/module_runner.sh`](../lib/module_runner.sh). Adding a component means adding an entry and a `lib/install_*.sh` — `install.sh` is not edited. Requires `jq`.
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique key (`[a-z0-9_]+`), referenced by `depends_on` |
+| `name` | Display name used in progress output and the summary |
+| `source_lib` | Library sourced by the registry (path relative to the installer root). Only sourced when the module matches `INSTALL_TARGET` |
+| `install_fn` / `uninstall_fn` | Functions defined by `source_lib` |
+| `targets` | `["*"]` for every target, or a list of `kind` / `openshift`. Non-matching modules are not sourced or installed; they are listed once in the install log under "Modules not applicable to target" and not shown on the terminal |
+| `required` | `true`: an install failure aborts the installer. `false`: warn and continue |
+| `depends_on` | Module ids that must be installed first |
+
+### Wave architecture
+
+Two files describe the whole installation:
+
+- [`lib/images.env`](../lib/images.env) describes **which image** each component uses.
+- [`modules.json`](../modules.json) describes **which components** exist and what they depend on.
+
+![Installer overview](images/installer-flow.svg)
+
+`install.sh` loads both files, then installs the modules in waves. A module's wave is 1 plus the highest wave among its dependencies, and a module with no dependencies is in wave 1. Modules inside a wave install in parallel. A wave starts only after the previous wave has finished.
+
+#### Waves on the Kind target
+
+Arrows point from a dependency to the module that depends on it.
+
+![Installation waves on the Kind target](images/waves-kind.svg)
+
+#### Waves on the OpenShift target
+
+`prometheus`, `jafra`, `jafra_mcp` and `prometheus_mcp` list only `kind` in `targets`, so they are neither sourced nor installed. Waves are computed for the selected target, and a dependency that does not apply to it is ignored. `quarkus_mcp` depends on `prometheus`, which is pre-installed on OpenShift, so it moves to wave 1 and installs in parallel with `postgres` and `k8s_mcp`.
+
+![Installation waves on the OpenShift target](images/waves-openshift.svg)
+
+### Runtime behaviour
+
+| Situation | Result |
+|---|---|
+| A wave runs | Modules run concurrently. Their output is buffered and written to the log in `modules.json` order after the wave ends. Modules must not rely on a sibling in the same wave, so declare the need with `depends_on` |
+| A `required` module fails | The rest of the wave is stopped, no later wave starts, and the installer exits 1. Ctrl-C and `SIGTERM` stop the wave the same way |
+| An optional module fails | Warning, and the install continues. Its dependents are skipped, or the installer aborts if a dependent is `required` |
+| `install_fn` returns `2` | Skipped on purpose (for example, its image is unset). It is not listed as installed, and its dependents are skipped. `0` is success, and any other non-zero value is a failure |
+| A dependency does not apply to the target | Ignored: it neither blocks the dependent nor delays its wave. `quarkus_mcp` is in wave 2 on Kind and wave 1 on OpenShift |
+| Health check | After the install, `registry_check_health` runs each module's `<id>_health` function if it has one. Exit `0` means healthy. Nothing is declared in `modules.json`. See `check_deployment_healthy` in `lib/install_utils.sh` |
+| `--terminate` | Runs `uninstall_fn` one module at a time, in reverse order |
+| `--dry-run` | Validates and walks the waves without deploying. Health checks are skipped |
+
+`modules.json` is validated before any cluster work: JSON, `schema_version`, field types, duplicate ids, unknown dependencies, cycles, and missing `source_lib` or functions.
+
+**Not in the registry:** manifest paths (each `source_lib` owns them), image variables (see [Image resolution](#image-resolution)), and Kind cluster, cert-manager and OpenShift monitoring setup (`install.sh`).
+
+### Adding a new component
+
+Add the manifests, a `lib/install_<name>.sh`, one entry in `modules.json` and, if the component has an image, one entry in `lib/images.env`. `install.sh` and `lib/validator.sh` are not edited. If Causa should call the new MCP server, also register it in the two `mcp.json` files. See [Adding a new component](adding-a-component.md) for the steps, an example and a checklist.
 
 ## Target-specific behaviour
 
@@ -75,6 +134,26 @@ CLI flag  >  exported env var  >  lib/images.env
 ```
 
 `lib/images.env` uses `${VAR:-value}` syntax, so any value already exported in the environment before the script runs is preserved. There are no hardcoded image fallbacks in the component scripts — `lib/images.env` is the single source of truth.
+
+### Adding or changing an image
+
+Edit only `lib/images.env`:
+
+```bash
+# Widget Service
+WIDGET_SERVICE_IMAGE=${WIDGET_SERVICE_IMAGE:-quay.io/org/widget:1.0.0}
+```
+
+[`lib/images.sh`](../lib/images.sh) discovers every `^[A-Z][A-Z0-9_]*_IMAGE=` line and derives the rest:
+
+| Derived | From | Example |
+|---|---|---|
+| CLI flag | variable name, lowercased with `-` | `--widget-service-image` |
+| `--help` text | comment on the line above (text from ` (` onwards dropped) | `Override Widget Service image` |
+| Override sentinel | variable name | `WIDGET_SERVICE_IMAGE_OVERRIDDEN` |
+| Format validation | every discovered variable | `validate_image_overrides` |
+
+To change a default tag, edit the value in `lib/images.env`. The component script reads `${WIDGET_SERVICE_IMAGE}` directly.
 
 ## Container runtime detection (kind only)
 

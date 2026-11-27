@@ -8,6 +8,9 @@
 if [[ -n "${INSTALL_QUARKUS_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_QUARKUS_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 _quarkus_mcp_not_released() {
     [[ -z "${QUARKUS_MCP_IMAGE:-}" ]]
 }
@@ -32,7 +35,7 @@ install_quarkus_mcp() {
 
     if _quarkus_mcp_not_released; then
         log_warn "Quarkus MCP Server: image not yet released — skipping (set QUARKUS_MCP_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     # Quarkus MCP queries Prometheus for metrics.  On kind we must verify that
@@ -61,10 +64,9 @@ install_quarkus_mcp() {
         write_to_log_file "INFO" "Using kube-prometheus-stack URL: ${prom_url}"
     fi
 
-    # Fix (comment 2): check mktemp before using the path; use $$ in the name
-    # to avoid collisions with leftover files from interrupted runs.
+    # Temp files live in the per-run installer temp dir and are removed on exit.
     local tmp
-    if ! tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml); then
+    if ! tmp=$(make_temp manifest); then
         log_error "Failed to create temporary file for Quarkus MCP manifest"
         return 1
     fi
@@ -79,10 +81,7 @@ install_quarkus_mcp() {
     fi
     rm -f "${tmp}"
 
-    if ! wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" 300; then
-        log_error "Quarkus MCP did not become ready"
-        return 1
-    fi
+    wait_for_deployment "mcp-metrics" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Quarkus MCP Server installed"
 
@@ -126,5 +125,13 @@ uninstall_quarkus_mcp() {
     return 0
 }
 
+################################################################################
+# quarkus_mcp_health — post-install health check used by registry_check_health
+################################################################################
+quarkus_mcp_health() {
+    check_deployment_healthy "mcp-metrics"
+}
+
 export -f install_quarkus_mcp
 export -f uninstall_quarkus_mcp
+export -f quarkus_mcp_health

@@ -8,9 +8,9 @@ Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster
 | Component | Kind | OpenShift | Access |
 |---|---|---|---|
 | Kubernetes MCP Server | ✓ | ✓ | NodePort 30000 (Kind) / Route (OpenShift) |
-| Causa Backend | ✓ | ✓ | NodePort 30001 (Kind) / Route (OpenShift) |
+| Causa Backend | ✓ | ✓ | `kubectl port-forward svc/causa-backend 30001:8080` (Kind) / Route (OpenShift) |
 | Quarkus MCP Server | ✓ | ✓ | NodePort 30004 (Kind) / Route (OpenShift) |
-| Causa MCP Server | ✓ | ✓ | NodePort 30005 (Kind) / Route (OpenShift) |
+| Causa MCP Server | ✓ | ✓ | `kubectl port-forward svc/causa-mcp 30005:8081` (Kind) / Route (OpenShift) |
 | PostgreSQL (pgvector) | ✓ | ✓ | ClusterIP — standalone Deployment (Kind) / CloudNativePG operator (OpenShift) |
 | Prometheus Stack | ✓ | — | kube-prometheus-stack on Kind; built-in UWM on OpenShift (no install needed) |
 | Jafra Ecosystem (Controller + Analyzer + Agent) | ✓ | — | Not supported on OpenShift |
@@ -24,12 +24,15 @@ Supports two target platforms: a local [Kind](https://kind.sigs.k8s.io/) cluster
 - [`kind`](https://kind.sigs.k8s.io/docs/user/quick-start/#installation)
 - [`kubectl`](https://kubernetes.io/docs/tasks/tools/)
 - [`helm`](https://helm.sh/docs/intro/install/) — required for the Prometheus Stack
+- [`jq`](https://jqlang.github.io/jq/download/) — required to read the module registry (`modules.json`)
 - `curl`, `grep`, `sed`, `awk` — pre-installed on macOS and most Linux distributions
 
 
 ### OpenShift
 
 - [`oc`](https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html) (preferred) or `kubectl`
+- [`helm`](https://helm.sh/docs/intro/install/)
+- [`jq`](https://jqlang.github.io/jq/download/) — required to read the module registry (`modules.json`)
 - `curl`, `grep`, `sed`, `awk`
 - An active login to the target cluster (`oc login`)
 - `cert-manager` already installed in the cluster
@@ -96,14 +99,14 @@ lib/
   install_causa.sh            # Causa
   install_causa_mcp.sh        # Causa MCP Server
 manifests/
-  k8s_mcp_server.yaml         # Kubernetes MCP Server (NodePort 30000)
-  causa/                      # Causa (NodePort 30001, kind)
+  kubernetes_mcp/             # Kubernetes MCP Server (NodePort 30000)
+  causa/                      # Causa — Kustomize layout mirroring upstream causaai/causa (base, overlays — upstream-synced; installer — local changes + mcp.json)
   jafra/                      # Jafra Ecosystem (kind only)
   jafra_mcp/                  # Jafra MCP Server (NodePort 30003, kind only)
   quarkus_mcp/                # Quarkus MCP Server (NodePort 30004)
   causa_mcp/                  # Causa MCP Server (NodePort 30005)
   postgres/                   # PostgreSQL — kind Deployment + OpenShift CNPG manifests
-  openshift/                  # OpenShift-specific manifests (Routes, Causa, monitoring)
+  openshift/                  # OpenShift-specific manifests (Routes, monitoring)
   prometheus/                 # PrometheusRule (applied on both targets)
 ```
 
