@@ -62,7 +62,17 @@ LOG_FILE="${LOG_FILE:-}"
 # Get timestamp in ISO 8601 format
 ################################################################################
 get_timestamp() {
-    date -u +"%Y-%m-%dT%H:%M:%S.%3NZ"
+    # One date call so seconds and milliseconds come from the same instant.
+    # BSD date (macOS) has no %N and echoes it back literally ("%N" or "N"), so
+    # take milliseconds only when %N produced 9 digits; otherwise use 000.
+    local out ts ns ms="000"
+    out=$(date -u +"%Y-%m-%dT%H:%M:%S %N")
+    ts="${out%% *}"
+    ns="${out#* }"
+    if [[ "${ns}" =~ ^[0-9]{9}$ ]]; then
+        ms="${ns:0:3}"
+    fi
+    echo "${ts}.${ms}Z"
 }
 
 ################################################################################
@@ -380,6 +390,8 @@ stop_spinner() {
 _spinner_cleanup_trap() {
     local sig="${1:-INT}"
     stop_spinner
+    # The re-raised signal below skips the EXIT trap, so remove temp files here.
+    if declare -F cleanup_temp_files >/dev/null 2>&1; then cleanup_temp_files; fi
     # Reset to default and re-raise so the script exits with the correct signal.
     trap - "${sig}"
     kill -s "${sig}" "$$"

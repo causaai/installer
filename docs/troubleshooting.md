@@ -31,7 +31,8 @@ kubectl logs -n causa-rca -l app=causa-backend
 # Verify MCP env vars were stamped correctly
 kubectl set env deployment/causa-backend -n causa-rca --list | grep CAUSA_MCP
 
-# Health check (Kind — NodePort)
+# Health check (Kind — start port-forward first, then curl)
+kubectl port-forward svc/causa-backend 30001:8080 -n causa-rca &
 curl http://localhost:30001/q/health/ready
 
 # Health check (OpenShift — via Route)
@@ -234,10 +235,10 @@ are checked depends on the port's role:
 
 | Port  | Service        | Role                           | When it's checked    |
 |-------|----------------|-------------------------------|----------------------|
-| 30000 | Kubernetes MCP | NodePort mapped to `localhost` | New cluster only     |
-| 30001 | Causa Backend  | NodePort mapped to `localhost` | New cluster only     |
-| 30004 | Quarkus MCP    | NodePort mapped to `localhost` | New cluster only     |
-| 30005 | Causa MCP      | NodePort mapped to `localhost` | New cluster only     |
+| 30000 | Kubernetes MCP | NodePort mapped to `localhost`              | New cluster only     |
+| 30001 | Causa Backend  | `port-forward` target port on `localhost`   | New cluster only     |
+| 30004 | Quarkus MCP    | NodePort mapped to `localhost`              | New cluster only     |
+| 30005 | Causa MCP      | `port-forward` target port on `localhost`   | New cluster only     |
 | 30003 | Jafra MCP      | NodePort, in-cluster only      | Never                |
 
 After deleting a Kind cluster, gvproxy (Podman/Docker network proxy) may still hold the host port bindings.

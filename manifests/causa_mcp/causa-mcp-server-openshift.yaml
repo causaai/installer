@@ -1,0 +1,78 @@
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: causa-mcp
+  labels:
+    app: causa-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: causa-mcp
+  template:
+    metadata:
+      labels:
+        app: causa-mcp
+    spec:
+      containers:
+        - name: causa-mcp
+          image: quay.io/causaai/causa-mcp:0.0.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+          env:
+            - name: CAUSA_ENGINE_URL
+              value: "http://causa-backend:8080"
+            - name: CAUSA_CLUSTER_NAME
+              value: "openshift"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: causa-mcp
+spec:
+  selector:
+    app: causa-mcp
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
+
+---
+# Route — exposes the service externally (OpenShift only)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: causa-mcp
+spec:
+  to:
+    kind: Service
+    name: causa-mcp
+  port:
+    targetPort: 8081
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

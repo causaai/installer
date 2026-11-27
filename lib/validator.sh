@@ -27,7 +27,7 @@ validate_prerequisites() {
         # Not required: kind, docker/podman (no local cluster management)
         # oc is preferred; kubectl is accepted as a fallback. Requiring kubectl
         # unconditionally would reject valid OCP environments that have oc only.
-        local required_tools=("helm" "curl" "grep" "sed" "awk")
+        local required_tools=("helm" "jq" "curl" "grep" "sed" "awk")
 
         if check_command_exists "oc"; then
             write_to_log_file "SUCCESS" "oc (OpenShift CLI) found: $(oc version --client --short 2>/dev/null || echo 'unknown')"
@@ -56,6 +56,7 @@ validate_prerequisites() {
             log_error "  - oc:      https://docs.openshift.com/container-platform/latest/cli_reference/openshift_cli/getting-started-cli.html"
             log_error "  - kubectl: https://kubernetes.io/docs/tasks/tools/"
             log_error "  - helm:    https://helm.sh/docs/intro/install/"
+            log_error "  - jq:      https://jqlang.github.io/jq/download/"
             return 1
         fi
     else
@@ -80,7 +81,7 @@ validate_prerequisites() {
         # its binary exists — if neither daemon responded to the timed probe the
         # runtime is considered unavailable and the check below returns 1.
 
-        local required_tools=("kubectl" "kind" "helm" "curl" "grep" "sed" "awk")
+        local required_tools=("kubectl" "kind" "helm" "jq" "curl" "grep" "sed" "awk")
         [[ -z "${container_runtime}" ]] && required_tools+=("docker")  # will fail with a clear message
 
         for tool in "${required_tools[@]}"; do
@@ -98,6 +99,7 @@ validate_prerequisites() {
             log_error "  - kind:    https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
             log_error "  - kubectl: https://kubernetes.io/docs/tasks/tools/"
             log_error "  - helm:    https://helm.sh/docs/intro/install/"
+            log_error "  - jq:      https://jqlang.github.io/jq/download/"
             return 1
         fi
 
@@ -224,13 +226,10 @@ validate_cluster_access() {
 
     write_to_log_file "SUCCESS" "Cluster is reachable (context: ${ctx})"
 
-    # OpenShift: ensure the install namespace exists before any component step runs.
-    # For kind the namespace is created by install_prometheus (step 2), after the
-    # cluster itself is provisioned in step 1.
-    if _is_openshift_target; then
-        if ! create_namespace; then
-            return 1
-        fi
+    # Ensure the install namespace exists before any component step runs, so
+    # modules installed in parallel never race to create it (kind and OpenShift).
+    if ! create_namespace; then
+        return 1
     fi
 
     log_validation_success "Validating Cluster Access"
@@ -280,32 +279,24 @@ validate_image_format() {
 
 ################################################################################
 # validate_image_overrides
-# Validates all image variables (whether from images.env or CLI override).
+# Validates every image variable discovered from lib/images.env (see
+# lib/images.sh), whether its value came from images.env, the environment or a
+# CLI override.  No image is named here: a new image added to images.env is
+# validated automatically.
 ################################################################################
 validate_image_overrides() {
-    local failed=false
+    local failed=false i var overridden
 
-    _vi() {
-        local img="$1" flag="$2" overridden="$3"
-        [[ -z "${img}" ]] && return 0
-        if [[ "${overridden}" == "true" ]]; then
-            validate_image_format "${img}" "${flag}" || failed=true
+    for i in "${!IMAGE_VARS[@]}"; do
+        var="${IMAGE_VARS[i]}"
+        [[ -z "${!var:-}" ]] && continue
+        overridden="${var}_OVERRIDDEN"
+        if [[ "${!overridden:-false}" == "true" ]]; then
+            validate_image_format "${!var}" "${IMAGE_FLAGS[i]}" || failed=true
         else
-            validate_image_format_silent "${img}" "${flag}" || failed=true
+            validate_image_format_silent "${!var}" "${IMAGE_FLAGS[i]}" || failed=true
         fi
-    }
-
-    _vi "${K8S_MCP_SERVER_IMAGE}"          "--k8s-mcp-server-image"       "${K8S_MCP_SERVER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_MCP_IMAGE}"               "--jafra-mcp-image"            "${JAFRA_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${CAUSA_BACKEND_IMAGE}"           "--causa-backend-image"        "${CAUSA_BACKEND_IMAGE_OVERRIDDEN:-false}"
-    _vi "${QUARKUS_MCP_IMAGE}"             "--quarkus-mcp-image"          "${QUARKUS_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${PROMETHEUS_MCP_SERVER_IMAGE}"   "--prometheus-mcp-server-image" "${PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${CAUSA_MCP_IMAGE}"               "--causa-mcp-image"            "${CAUSA_MCP_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_CONTROLLER_IMAGE}"        "--jafra-controller-image"     "${JAFRA_CONTROLLER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_ANALYZER_IMAGE}"          "--jafra-analyzer-image"       "${JAFRA_ANALYZER_IMAGE_OVERRIDDEN:-false}"
-    _vi "${JAFRA_AGENT_IMAGE}"             "--jafra-agent-image"          "${JAFRA_AGENT_IMAGE_OVERRIDDEN:-false}"
-    _vi "${POSTGRES_KIND_IMAGE}"           "--postgres-kind-image"        "${POSTGRES_KIND_IMAGE_OVERRIDDEN:-false}"
-    _vi "${POSTGRES_OCP_IMAGE}"            "--postgres-ocp-image"         "${POSTGRES_OCP_IMAGE_OVERRIDDEN:-false}"
+    done
 
     if [[ "${failed}" == "true" ]]; then
         log_error "Image validation failed. Correct the image format and retry."
@@ -316,7 +307,8 @@ validate_image_overrides() {
 
 ################################################################################
 # post_component_validation
-# Health summary after all components are installed.
+# Health summary after all components are installed.  The per-module checks come
+# from the module registry (registry_check_health), not from a list kept here.
 ################################################################################
 post_component_validation() {
     local elapsed_label="${1:-}"
@@ -327,76 +319,16 @@ post_component_validation() {
         return 0
     fi
 
-    local failed=0
-
-    _check_deployment() {
-        local display="$1" deploy="$2" var="$3"
-        local rr dr
-        if ${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" &>/dev/null; then
-            rr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
-                    -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-            dr=$(${KUBE_CLI} get deployment "${deploy}" -n "${INSTALL_NAMESPACE}" \
-                    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
-            if [[ "${rr:-0}" == "${dr}" ]]; then
-                printf -v "${var}" '%b' "${COLOR_BOLD_GREEN}${display} ✓${COLOR_RESET}"
-                write_to_log_file "SUCCESS" "${display} is healthy"
-            else
-                printf -v "${var}" '%b' "${COLOR_BOLD_RED}${display} ✗${COLOR_RESET}"
-                write_to_log_file "ERROR" "${display} pods not ready: ${rr:-0}/${dr}"
-                (( failed++ ))
-            fi
-        else
-            printf -v "${var}" '%b' "${COLOR_YELLOW}${display} — not installed${COLOR_RESET}"
-            write_to_log_file "INFO" "${display} deployment not found (skipped)"
-        fi
-    }
-
-    # On OpenShift, PostgreSQL is a CNPG Cluster — check the primary pod directly,
-    # not a Deployment (which doesn't exist on that target).
-    _check_postgres_ocp() {
-        local var="$1"
-        local phase
-        phase=$(${KUBE_CLI} get cluster.postgresql.cnpg.io iri-db \
-            -n "${INSTALL_NAMESPACE}" \
-            -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        if [[ "${phase}" == "Cluster in healthy state" ]]; then
-            printf -v "${var}" '%b' "${COLOR_BOLD_GREEN}PostgreSQL (CNPG) ✓${COLOR_RESET}"
-            write_to_log_file "SUCCESS" "PostgreSQL (CNPG) is healthy"
-        elif [[ -n "${phase}" ]]; then
-            printf -v "${var}" '%b' "${COLOR_BOLD_RED}PostgreSQL (CNPG) ✗ — ${phase}${COLOR_RESET}"
-            write_to_log_file "ERROR" "PostgreSQL (CNPG) not healthy: ${phase}"
-            (( failed++ ))
-        else
-            printf -v "${var}" '%b' "${COLOR_YELLOW}PostgreSQL — not installed${COLOR_RESET}"
-            write_to_log_file "INFO" "PostgreSQL CNPG cluster not found (skipped)"
-        fi
-    }
-
-    local k8s_mcp_status jafra_mcp_status quarkus_status prom_mcp_status postgres_status causa_status causa_mcp_status
-
-    _check_deployment "Kubernetes MCP Server"  "kubernetes-mcp-server"  k8s_mcp_status
-    _check_deployment "Jafra MCP Server"       "jafra-mcp"              jafra_mcp_status
-    _check_deployment "Quarkus MCP Server"     "mcp-metrics"            quarkus_status
-    if [[ "${INSTALL_TARGET:-kind}" == "openshift" ]]; then
-        _check_postgres_ocp postgres_status
-    else
-        _check_deployment "PostgreSQL"         "postgres"               postgres_status
-    fi
-    _check_deployment "Prometheus MCP Server"  "prometheus-mcp-server"  prom_mcp_status
-    _check_deployment "Causa Backend"          "causa-backend"          causa_status
-    _check_deployment "Causa MCP Server"       "causa-mcp"              causa_mcp_status
+    local failed=0 line
+    registry_check_health || failed=$?
 
     {
         echo ""
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Component Health Summary${COLOR_RESET}"
         echo ""
-        echo -e "${k8s_mcp_status}"
-        echo -e "${jafra_mcp_status}"
-        echo -e "${quarkus_status}"
-        echo -e "${prom_mcp_status}"
-        echo -e "${postgres_status}"
-        echo -e "${causa_status}"
-        echo -e "${causa_mcp_status}"
+        for line in "${REGISTRY_HEALTH_LINES[@]+"${REGISTRY_HEALTH_LINES[@]}"}"; do
+            echo -e "${line}"
+        done
         echo ""
         [[ -n "${elapsed_label}" ]] && echo -e "${COLOR_BOLD_YELLOW}Total installation time: ${elapsed_label}${COLOR_RESET}" && echo ""
     } >/dev/tty 2>/dev/null || true
@@ -405,7 +337,7 @@ post_component_validation() {
         write_to_log_file "SUCCESS" "All components passed health validation"
         return 0
     else
-        log_error "${failed} component(s) failed health validation"
+        log_error "One or more components failed health validation"
         return 1
     fi
 }

@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: causa-backend
+  labels:
+    app.kubernetes.io/name: causa-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: causa-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: causa-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/q/metrics"
+    spec:
+      serviceAccountName: causa-backend
+      containers:
+      - name: causa-backend
+        image: quay.io/rh-ee-shesaxen/causa-backend:latest_mvp
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: management
+          containerPort: 9000
+          protocol: TCP
+        env:
+        # adding the namespace, which may be required to construct FQDN for k8s svc URLs
+        - name: APP_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        envFrom:
+        # Public configuration (non-sensitive)
+        # Loads ALL keys from ConfigMap as environment variables
+        - configMapRef:
+            name: causa-config
+        # Secrets (API keys, credentials)
+        # Loads ALL keys from Secret as environment variables
+        - secretRef:
+            name: causa-llm-secrets
+            optional: true  # Allow deployment without secrets for non-LLM features
+        - secretRef:
+            name: causa-db-secrets
+            optional: false
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        volumeMounts:
+        - name: mcp-config
+          mountPath: /etc/causa
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /q/health/live
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /q/health/ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 5
+      volumes:
+      - name: mcp-config
+        configMap:
+          name: causa-mcp-config

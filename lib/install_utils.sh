@@ -23,6 +23,86 @@ readonly EXIT_INSTALLATION_FAILED=4
 readonly EXIT_VALIDATION_FAILED=5
 
 ################################################################################
+# Temporary files
+#
+# One private directory per installer run holds every temp file, so a single
+# `rm -rf` at exit (or on INT/TERM) removes them all — including files created
+# inside $( ) command substitutions and parallel wave subshells, where a list
+# kept in a shell variable would be lost.
+#
+#   init_temp_dir        call once, early, in the top-level process
+#   make_temp <label>    prints the path of a new empty file: <dir>/<label>-XXXXXX
+#   cleanup_temp_files   removes the directory (idempotent)
+#
+# The directory is created under ${TMPDIR:-/tmp}; macOS sets TMPDIR to a private
+# per-user folder with a trailing slash, which is stripped.  BSD mktemp only
+# substitutes trailing X's, so never put a suffix such as ".yaml" after them.
+################################################################################
+_CAUSA_TMPDIR=""
+_CAUSA_TMPDIR_OWNER=""
+_CAUSA_CUR_PID=""
+
+# _set_current_shell_pid — sets _CAUSA_CUR_PID to the real PID of the running
+# shell, including inside $( ) and ( ) subshells, where $$ still reports the
+# top-level shell.  Must be called directly (never via $( ), which would fork).
+# bash 4+ has $BASHPID; bash 3.2 (macOS) does not, so ask a child `sh` for its
+# parent PID, writing to a file because capturing it would need a subshell.
+_set_current_shell_pid() {
+    _CAUSA_CUR_PID=""
+    if [[ -n "${BASHPID:-}" ]]; then
+        _CAUSA_CUR_PID="${BASHPID}"
+        return 0
+    fi
+    local probe
+    probe=$(mktemp "${_CAUSA_TMPDIR}/pid-XXXXXX") || return 1
+    sh -c 'echo $PPID' >"${probe}"
+    read -r _CAUSA_CUR_PID <"${probe}" || true
+    rm -f "${probe}"
+    [[ -n "${_CAUSA_CUR_PID}" ]]
+}
+
+init_temp_dir() {
+    [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]] && return 0
+    local base="${TMPDIR:-/tmp}"
+    _CAUSA_TMPDIR=$(mktemp -d "${base%/}/causa-installer-$$-XXXXXX") || {
+        _CAUSA_TMPDIR=""
+        log_error "Failed to create the installer temporary directory under ${base}"
+        return 1
+    }
+    _set_current_shell_pid || {
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+        log_error "Failed to determine the installer shell PID"
+        return 1
+    }
+    _CAUSA_TMPDIR_OWNER="${_CAUSA_CUR_PID}"
+}
+
+make_temp() {
+    local label="${1:-tmp}"
+    if [[ -n "${_CAUSA_TMPDIR}" && -d "${_CAUSA_TMPDIR}" ]]; then
+        mktemp "${_CAUSA_TMPDIR}/${label}-XXXXXX"
+    else
+        # init_temp_dir was not called (standalone use, tests): still works, but
+        # the file is not removed automatically.
+        mktemp "${TMPDIR:-/tmp}/causa-${label}-XXXXXX"
+    fi
+}
+
+# Removes the directory only from the shell that created it.  A subshell (for
+# example the one running `tmp=$(make_temp label)`) may run an inherited EXIT
+# trap; it must not delete the directory the parent is still using.
+cleanup_temp_files() {
+    if [[ -n "${_CAUSA_TMPDIR}" ]]; then
+        _set_current_shell_pid || return 0
+        [[ "${_CAUSA_CUR_PID}" == "${_CAUSA_TMPDIR_OWNER}" ]] || return 0
+        rm -rf "${_CAUSA_TMPDIR}"
+        _CAUSA_TMPDIR=""
+    fi
+    return 0
+}
+
+################################################################################
 # Error / cleanup
 ################################################################################
 cleanup_on_error() {
@@ -33,6 +113,7 @@ cleanup_on_error() {
             echo -e "${COLOR_GREEN}Check log file for details: ${LOG_FILE}${COLOR_RESET}" > /dev/tty 2>/dev/null || true
         fi
     fi
+    cleanup_temp_files
 }
 
 ################################################################################
@@ -212,28 +293,145 @@ delete_namespace() {
 }
 
 ################################################################################
+# Validate a timeout value before it is used in shell arithmetic.
+# Usage: validate_timeout <label> <value>
+#
+# Timeouts come from environment variables.  Bash evaluates variable contents
+# recursively inside $(( )), so a crafted value could execute commands.  Only a
+# decimal integer of 1-5 digits (1..99999 seconds) is accepted; callers must
+# then use it as $(( 10#${value} )) so leading zeros are not read as octal.
+################################################################################
+validate_timeout() {
+    local label="$1" value="$2"
+    if [[ "${value}" =~ ^[0-9]{1,5}$ ]] && (( 10#${value} >= 1 )); then
+        return 0
+    fi
+    log_error "Invalid ${label}: must be a whole number of seconds between 1 and 99999"
+    return 1
+}
+
+################################################################################
 # Wait for a deployment to reach ready state
 # Usage: wait_for_deployment <name> <namespace> <timeout_seconds>
+#
+# Fails fast instead of waiting out the whole timeout when a pod of the
+# deployment can never start because its image cannot be pulled.
+#   - InvalidImageName / ErrImageNeverPull fail immediately (they cannot recover).
+#   - ImagePullBackOff / ErrImagePull can be transient (slow registry, local
+#     registry not ready) and Kubernetes retries them, so they only fail once
+#     they have persisted for IMAGE_PULL_BACKOFF_GRACE seconds (default 60).
+#     The timer resets when no pod is failing to pull any more.
 ################################################################################
 wait_for_deployment() {
     local name="$1"
     local ns="${2:-${INSTALL_NAMESPACE}}"
     local timeout="${3:-300}"
+    local grace="${IMAGE_PULL_BACKOFF_GRACE:-60}"
+    local deadline reason reasons image sel now backoff_since=0
+    # Manifests label pods either `app=<name>` or `app.kubernetes.io/name=<name>`
+    local selectors=("app=${name}" "app.kubernetes.io/name=${name}")
+
+    validate_timeout "timeout for deployment ${name}" "${timeout}" || return 1
+    validate_timeout "IMAGE_PULL_BACKOFF_GRACE" "${grace}" || return 1
 
     write_to_log_file "INFO" "Waiting for deployment ${name} in ${ns} (timeout: ${timeout}s)..."
+    deadline=$(( $(date +%s) + 10#${timeout} ))
 
-    if ! ${KUBE_CLI} wait --for=condition=Available \
-        deployment/"${name}" \
-        -n "${ns}" \
-        --timeout="${timeout}s" >>"${LOG_FILE}" 2>&1; then
-        write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
-        ${KUBE_CLI} get pods -n "${ns}" -l "app=${name}" >>"${LOG_FILE}" 2>&1 || true
-        ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
-        return 1
+    local wait_out last_wait_err=""
+    while true; do
+        # Intermediate 5s timeouts are expected and not logged; any other
+        # failure (API/authorization/not found) is logged once per distinct message.
+        if wait_out=$(${KUBE_CLI} wait --for=condition=Available \
+            deployment/"${name}" \
+            -n "${ns}" \
+            --timeout=5s 2>&1); then
+            write_to_log_file "SUCCESS" "Deployment ${name} is ready"
+            return 0
+        fi
+        if [[ -n "${wait_out}" && "${wait_out}" != *"timed out waiting for the condition"* \
+              && "${wait_out}" != "${last_wait_err}" ]]; then
+            write_to_log_file "WARN" "Deployment ${name}: ${KUBE_CLI} wait failed: ${wait_out}"
+            last_wait_err="${wait_out}"
+        fi
+
+        reasons=""
+        for sel in "${selectors[@]}"; do
+            reasons+=$(${KUBE_CLI} get pods -n "${ns}" -l "${sel}" \
+                -o jsonpath='{range .items[*].status.containerStatuses[*]}{.state.waiting.reason}{"\n"}{end}' \
+                2>/dev/null || true)
+            reasons+=$'\n'
+        done
+
+        now=$(date +%s)
+        reason=""
+        if [[ "${reasons}" =~ (InvalidImageName|ErrImageNeverPull) ]]; then
+            # Cannot recover: fail immediately
+            reason="${BASH_REMATCH[1]}"
+        elif [[ "${reasons}" == *ImagePullBackOff* || "${reasons}" == *ErrImagePull* ]]; then
+            # Kubernetes alternates a failing pod between ErrImagePull and
+            # ImagePullBackOff, so both count as one ongoing pull failure.
+            if (( backoff_since == 0 )); then
+                backoff_since=${now}
+                write_to_log_file "WARN" "Deployment ${name}: image pull failing, allowing ${grace}s for recovery"
+            fi
+            if (( now - backoff_since >= 10#${grace} )); then
+                reason="ImagePullBackOff"
+            fi
+        else
+            # No pull failure: reset the grace timer
+            backoff_since=0
+        fi
+
+        if [[ -n "${reason}" ]]; then
+            image=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+                -o jsonpath='{.spec.template.spec.containers[*].image}' 2>/dev/null || true)
+            log_error "Deployment ${name} cannot start: ${reason} (image: ${image:-unknown}). Check the image name and registry access."
+            break
+        fi
+
+        if [[ ${now} -ge ${deadline} ]]; then
+            log_error "Deployment ${name} did not become ready within ${timeout}s"
+            break
+        fi
+        sleep 2
+    done
+
+    write_to_log_file "ERROR" "Deployment ${name} failed to become ready"
+    for sel in "${selectors[@]}"; do
+        ${KUBE_CLI} get pods -n "${ns}" -l "${sel}" >>"${LOG_FILE}" 2>&1 || true
+    done
+    ${KUBE_CLI} describe deployment "${name}" -n "${ns}" >>"${LOG_FILE}" 2>&1 || true
+    return 1
+}
+
+################################################################################
+# Check that a deployment has all of its replicas ready
+# Usage: check_deployment_healthy <name> [namespace]
+# Returns 0 when readyReplicas == spec.replicas, 1 when it exists but is not
+# ready, and 2 when the deployment does not exist (not installed).
+################################################################################
+check_deployment_healthy() {
+    local name="$1"
+    local ns="${2:-${INSTALL_NAMESPACE}}"
+    local ready desired
+
+    if ! ${KUBE_CLI} get deployment "${name}" -n "${ns}" &>/dev/null; then
+        write_to_log_file "INFO" "Deployment ${name} not found (skipped)"
+        return 2
     fi
 
-    write_to_log_file "SUCCESS" "Deployment ${name} is ready"
-    return 0
+    ready=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+        -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+    desired=$(${KUBE_CLI} get deployment "${name}" -n "${ns}" \
+        -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "1")
+
+    if [[ "${ready:-0}" == "${desired}" ]]; then
+        write_to_log_file "SUCCESS" "Deployment ${name} is healthy"
+        return 0
+    fi
+
+    write_to_log_file "ERROR" "Deployment ${name} pods not ready: ${ready:-0}/${desired}"
+    return 1
 }
 
 ################################################################################
@@ -269,7 +467,7 @@ apply_manifest() {
         return 1
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
 
     # Namespace and cluster-type substitution
     sed -e "s/PLACEHOLDER_NAMESPACE/${ns}/g" \
@@ -308,7 +506,7 @@ delete_manifest() {
         return 0
     fi
 
-    local tmp; tmp=$(mktemp /tmp/causa-rca-$$-manifest-XXXXXX.yaml)
+    local tmp; tmp=$(make_temp manifest)
     sed "s/PLACEHOLDER_NAMESPACE/${ns}/g" "${manifest}" > "${tmp}"
 
     ${KUBE_CLI} delete -f "${tmp}" --ignore-not-found=true >>"${LOG_FILE}" 2>&1 || true
@@ -321,6 +519,9 @@ delete_manifest() {
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+export -f init_temp_dir
+export -f make_temp
+export -f cleanup_temp_files
 export -f cleanup_on_error
 export -f enable_cleanup_trap
 export -f handle_error
@@ -331,6 +532,7 @@ export -f check_command_exists
 export -f create_namespace
 export -f delete_namespace
 export -f wait_for_deployment
+export -f check_deployment_healthy
 export -f calculate_elapsed_label
 export -f apply_manifest
 export -f delete_manifest

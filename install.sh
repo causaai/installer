@@ -27,16 +27,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SCRIPT_DIR
 
 # ---------------------------------------------------------------------------
-# Source images.env FIRST — defines image defaults; can be overridden by
-# CLI flags or exported env vars (priority: CLI > export > images.env)
-# ---------------------------------------------------------------------------
-IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
-if [[ -f "${IMAGES_ENV_FILE}" ]]; then
-    # shellcheck source=lib/images.env
-    source "${IMAGES_ENV_FILE}"
-fi
-
-# ---------------------------------------------------------------------------
 # Global configuration defaults
 # ---------------------------------------------------------------------------
 MANIFESTS_DIR="${SCRIPT_DIR}/manifests"
@@ -85,58 +75,28 @@ export KIND_CLUSTER_NAME KIND_REGISTRY_NAME KIND_REGISTRY_PORT
 CAUSA_MCP_QUARKUS_METRICS_BASE_URL="${CAUSA_MCP_QUARKUS_METRICS_BASE_URL:-}"
 export CAUSA_MCP_QUARKUS_METRICS_BASE_URL
 
-# Image variables (populated by images.env; can be overridden via CLI flags)
-K8S_MCP_SERVER_IMAGE="${K8S_MCP_SERVER_IMAGE:-}"
-CAUSA_BACKEND_IMAGE="${CAUSA_BACKEND_IMAGE:-}"
-JAFRA_MCP_IMAGE="${JAFRA_MCP_IMAGE:-}"
-QUARKUS_MCP_IMAGE="${QUARKUS_MCP_IMAGE:-}"
-PROMETHEUS_MCP_SERVER_IMAGE="${PROMETHEUS_MCP_SERVER_IMAGE:-}"
-CAUSA_MCP_IMAGE="${CAUSA_MCP_IMAGE:-}"
-JAFRA_CONTROLLER_IMAGE="${JAFRA_CONTROLLER_IMAGE:-}"
-JAFRA_ANALYZER_IMAGE="${JAFRA_ANALYZER_IMAGE:-}"
-JAFRA_AGENT_IMAGE="${JAFRA_AGENT_IMAGE:-}"
-POSTGRES_KIND_IMAGE="${POSTGRES_KIND_IMAGE:-}"
-POSTGRES_OCP_IMAGE="${POSTGRES_OCP_IMAGE:-}"
-export K8S_MCP_SERVER_IMAGE CAUSA_BACKEND_IMAGE
-export JAFRA_MCP_IMAGE QUARKUS_MCP_IMAGE PROMETHEUS_MCP_SERVER_IMAGE CAUSA_MCP_IMAGE
-export JAFRA_CONTROLLER_IMAGE JAFRA_ANALYZER_IMAGE JAFRA_AGENT_IMAGE
-export POSTGRES_KIND_IMAGE POSTGRES_OCP_IMAGE
-
-# Sentinel flags — set to "true" only when a CLI flag explicitly overrides an image
-K8S_MCP_SERVER_IMAGE_OVERRIDDEN=false
-CAUSA_BACKEND_IMAGE_OVERRIDDEN=false
-JAFRA_MCP_IMAGE_OVERRIDDEN=false
-QUARKUS_MCP_IMAGE_OVERRIDDEN=false
-PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN=false
-CAUSA_MCP_IMAGE_OVERRIDDEN=false
-JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=false
-JAFRA_ANALYZER_IMAGE_OVERRIDDEN=false
-JAFRA_AGENT_IMAGE_OVERRIDDEN=false
-POSTGRES_KIND_IMAGE_OVERRIDDEN=false
-POSTGRES_OCP_IMAGE_OVERRIDDEN=false
-export K8S_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_BACKEND_IMAGE_OVERRIDDEN
-export JAFRA_MCP_IMAGE_OVERRIDDEN QUARKUS_MCP_IMAGE_OVERRIDDEN PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN CAUSA_MCP_IMAGE_OVERRIDDEN
-export JAFRA_CONTROLLER_IMAGE_OVERRIDDEN JAFRA_ANALYZER_IMAGE_OVERRIDDEN JAFRA_AGENT_IMAGE_OVERRIDDEN
-export POSTGRES_KIND_IMAGE_OVERRIDDEN POSTGRES_OCP_IMAGE_OVERRIDDEN
-
 # ---------------------------------------------------------------------------
 # Source library files
 # ---------------------------------------------------------------------------
+# Component libraries (Prometheus, MCP servers, PostgreSQL, Causa, ...) are not
+# sourced here — they are declared in modules.json and sourced by registry_load.
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/install_utils.sh"
+source "${SCRIPT_DIR}/lib/images.sh"
 source "${SCRIPT_DIR}/lib/validator.sh"
 source "${SCRIPT_DIR}/lib/install_kind_cluster.sh"
-source "${SCRIPT_DIR}/lib/install_prometheus.sh"
 source "${SCRIPT_DIR}/lib/enable_monitoring.sh"
 source "${SCRIPT_DIR}/lib/install_cert_manager.sh"
-source "${SCRIPT_DIR}/lib/install_k8s_mcp.sh"
-source "${SCRIPT_DIR}/lib/install_jafra.sh"
-source "${SCRIPT_DIR}/lib/install_jafra_mcp.sh"
-source "${SCRIPT_DIR}/lib/install_quarkus_mcp.sh"
-source "${SCRIPT_DIR}/lib/install_prometheus_mcp.sh"
-source "${SCRIPT_DIR}/lib/install_postgres.sh"
-source "${SCRIPT_DIR}/lib/install_causa.sh"
-source "${SCRIPT_DIR}/lib/install_causa_mcp.sh"
+source "${SCRIPT_DIR}/lib/module_runner.sh"
+
+# ---------------------------------------------------------------------------
+# Image variables, their <VAR>_OVERRIDDEN sentinels and CLI flags are all
+# derived from lib/images.env (see lib/images.sh) — nothing is listed here.
+# ---------------------------------------------------------------------------
+IMAGES_ENV_FILE="${SCRIPT_DIR}/lib/images.env"
+if ! images_load "${IMAGES_ENV_FILE}"; then
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Activate opt-in traps (scoped here, not in shared libraries)
@@ -144,11 +104,11 @@ source "${SCRIPT_DIR}/lib/install_causa_mcp.sh"
 enable_cleanup_trap   # lib/install_utils.sh — log error on unexpected EXIT
 enable_spinner_trap   # lib/logging.sh       — stop spinner cleanly on INT/TERM
 
-# Temp file cleanup — remove stale files from a previous crashed run.
-# Only removes files whose name encodes this process's PID, so a concurrent
-# installer invocation on the same host is not affected.
+# Per-run temp directory — every temp file is created inside it via make_temp
+# and the whole directory is removed on exit, error, INT and TERM.  It is named
+# after this process's PID, so concurrent installer runs do not interfere.
 # ---------------------------------------------------------------------------
-rm -f /tmp/causa-$$-*.yaml
+init_temp_dir || exit 1
 
 # ---------------------------------------------------------------------------
 # Logging initialisation
@@ -159,7 +119,7 @@ initialize_logging() {
         {
             echo "========================================"
             echo "Uninstallation Log"
-            echo "Started: $(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
+            echo "Started: $(get_timestamp)"
             echo "========================================"
             echo ""
         } > "${LOG_FILE}"
@@ -184,65 +144,17 @@ _is_openshift_target() {
 }
 
 ################################################################################
-# _install_kind_only_components — kind-target-only steps (cert-manager path,
-# PostgreSQL Deployment, Causa Backend, Causa MCP)
+# _check_target_implemented — vm is accepted so the runtimes installer can build
+# on this one, but is not implemented here. Exits 2 so scripts and CI do not
+# read it as a successful install; the EXIT trap is cleared as nothing failed.
+# The runtimes installer redefines this function to allow vm.
 ################################################################################
-_install_kind_only_components() {
-    # ── Step 7: PostgreSQL ───────────────────────────────────────────────────
-    start_spinner "Installing PostgreSQL..."
-    if ! install_postgres; then
-        stop_spinner
-        log_error "Failed to install PostgreSQL"
-        exit 1
+_check_target_implemented() {
+    if [[ "${INSTALL_TARGET}" == "vm" ]]; then
+        log_warn "Target 'vm' is not yet supported by this installer"
+        trap - EXIT
+        exit 2
     fi
-    stop_spinner
-    log_install_success "PostgreSQL"
-    installed_components+=("PostgreSQL")
-
-    # ── Step 8: Causa Backend ────────────────────────────────────────────────
-    start_spinner "Installing Causa Backend..."
-    if ! install_causa; then
-        stop_spinner
-        log_error "Failed to install Causa Backend"
-        exit 1
-    fi
-    stop_spinner
-    log_install_success "Causa Backend"
-    installed_components+=("Causa Backend")
-
-    # ── Step 9: Causa MCP Server ─────────────────────────────────────────────
-    start_spinner "Installing Causa MCP Server..."
-    if ! install_causa_mcp; then
-        stop_spinner
-        log_warn "Causa MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Causa MCP Server"
-        installed_components+=("Causa MCP Server")
-    fi
-}
-
-################################################################################
-# _uninstall_kind_only_components — teardown for kind-only components
-################################################################################
-_uninstall_kind_only_components() {
-    start_spinner "Uninstalling Causa MCP Server..."
-    uninstall_causa_mcp
-    stop_spinner; log_uninstall_success "Causa MCP Server"
-
-    start_spinner "Uninstalling cert-manager..."
-    uninstall_cert_manager
-    stop_spinner; log_uninstall_success "cert-manager"
-
-    start_spinner "Uninstalling Causa Backend..."
-    if ! uninstall_causa; then
-        stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
-    fi
-    stop_spinner; log_uninstall_success "Causa Backend"
-
-    start_spinner "Uninstalling PostgreSQL..."
-    uninstall_postgres
-    stop_spinner; log_uninstall_success "PostgreSQL"
 }
 
 ################################################################################
@@ -250,6 +162,7 @@ _uninstall_kind_only_components() {
 ################################################################################
 main() {
     local start_time; start_time=$(date +%s)
+    _check_target_implemented
 
     write_to_log_file "INFO" "Starting Causa RCA installation..."
     write_to_log_file "INFO" "Target:         ${INSTALL_TARGET}"
@@ -268,11 +181,21 @@ main() {
         exit 1
     fi
 
-    # OpenShift pre-req: cert-manager must be present before any component runs.
-    # Placed here — after validate_prerequisites confirms oc/kubectl is available
-    # but before any cluster-side work — so a missing cert-manager is caught as
-    # early as possible in the validation section.
+    # Load and validate the module registry (modules.json) before any
+    # cluster-side work so a bad registry fails fast.
+    if ! registry_load; then
+        log_error "Module registry validation failed"
+        exit 1
+    fi
+
+    # OpenShift: the cluster already exists, so verify access (logged in, API
+    # reachable) first, then check that cert-manager is present before any
+    # component runs. (Kind validates access after the cluster is provisioned.)
     if _is_openshift_target; then
+        if ! validate_cluster_access; then
+            log_error "Cluster access check failed"
+            exit 1
+        fi
         if ! validate_cert_manager_with_prompt; then
             log_error "cert-manager pre-req check failed"
             exit 1
@@ -317,9 +240,10 @@ main() {
         installed_components+=("Kind Cluster (${KIND_CLUSTER_NAME})")
     fi
 
-    # After cluster is ready, validate connectivity
-    # Skip for dry-run on kind target — the cluster doesn't exist yet
-    if [[ "${DRY_RUN}" != "true" ]] || ! _is_kind_target; then
+    # Kind: validate connectivity once the cluster has been provisioned
+    # (OpenShift already validated cluster access in the pre-flight section).
+    # Skip for dry-run — the cluster doesn't exist yet.
+    if _is_kind_target && [[ "${DRY_RUN}" != "true" ]]; then
         if ! validate_cluster_access; then
             log_error "Cluster access check failed"
             exit 1
@@ -338,24 +262,12 @@ main() {
         log_install_success "Monitoring and Prometheus Alerts"
     fi
 
-    # ── Step 2: Prometheus Stack (kind target only) ──────────────────────────
-    if _is_kind_target; then
-        start_spinner "Installing Prometheus Stack (kube-prometheus-stack)..."
-        if ! install_prometheus; then
-            stop_spinner
-            log_error "Failed to install Prometheus Stack"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "Prometheus Stack (kube-prometheus-stack)"
-    fi
-
     # ── Step 3: cert-manager (kind target only, required by Jafra) ───────────
     if _is_kind_target; then
         start_spinner "Installing cert-manager..."
         if ! install_cert_manager; then
             stop_spinner
-            log_error "Failed to install cert-manager"
+            log_error "cert-manager setup failed"
             exit 1
         fi
         stop_spinner
@@ -363,101 +275,13 @@ main() {
         installed_components+=("cert-manager")
     fi
 
-    # ── Step 4: Kubernetes MCP Server ───────────────────────────────────────
-    start_spinner "Installing Kubernetes MCP Server..."
-    if ! install_kubernetes_mcp_server; then
-        stop_spinner
-        log_error "Failed to install Kubernetes MCP Server"
-        exit 1
-    fi
-    stop_spinner
-    log_install_success "Kubernetes MCP Server"
-    installed_components+=("Kubernetes MCP Server")
-
-    # ── Step 5: Jafra Ecosystem (Controller + Analyzer + Agent) ─────────────
-    # Not supported on OpenShift — skipped for that target.
-    if ! _is_openshift_target; then
-        start_spinner "Installing Jafra Ecosystem..."
-        if ! install_jafra; then
-            stop_spinner
-            log_warn "Jafra Ecosystem installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Jafra Ecosystem"
-            installed_components+=("Jafra Ecosystem")
-        fi
-    fi
-
-    # ── Step 6: Jafra MCP Server ─────────────────────────────────────────────
-    # Not supported on OpenShift — skipped for that target.
-    if ! _is_openshift_target; then
-        start_spinner "Installing Jafra MCP Server..."
-        if ! install_jafra_mcp; then
-            stop_spinner
-            log_warn "Jafra MCP Server installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Jafra MCP Server"
-            installed_components+=("Jafra MCP Server")
-        fi
-    fi
-
-    # ── Step 7: Quarkus MCP Server ───────────────────────────────────────────
-    start_spinner "Installing Quarkus MCP Server..."
-    if ! install_quarkus_mcp; then
-        stop_spinner
-        log_warn "Quarkus MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Quarkus MCP Server"
-        installed_components+=("Quarkus MCP Server")
-    fi
-    # ── Step 8: Prometheus MCP Server ────────────────────────────────────────
-    start_spinner "Installing Prometheus MCP Server..."
-    if ! install_prometheus_mcp_server; then
-        stop_spinner
-        log_warn "Prometheus MCP Server installation skipped or failed"
-    else
-        stop_spinner
-        log_install_success "Prometheus MCP Server"
-        installed_components+=("Prometheus MCP Server")
-    fi
-
-    # ── Steps 9-10: PostgreSQL + Causa Backend + Causa MCP ───────────────────
-    # On kind these run via _install_kind_only_components (standalone PG Deployment).
-    # On OpenShift they run directly (CNPG operator + OCP Route variants).
-    if _is_kind_target; then
-        _install_kind_only_components
-    else
-        start_spinner "Installing PostgreSQL..."
-        if ! install_postgres; then
-            stop_spinner
-            log_error "Failed to install PostgreSQL"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "PostgreSQL"
-        installed_components+=("PostgreSQL")
-
-        start_spinner "Installing Causa Backend..."
-        if ! install_causa; then
-            stop_spinner
-            log_error "Failed to install Causa Backend"
-            exit 1
-        fi
-        stop_spinner
-        log_install_success "Causa Backend"
-        installed_components+=("Causa Backend")
-
-        start_spinner "Installing Causa MCP Server..."
-        if ! install_causa_mcp; then
-            stop_spinner
-            log_warn "Causa MCP Server installation skipped or failed"
-        else
-            stop_spinner
-            log_install_success "Causa MCP Server"
-            installed_components+=("Causa MCP Server")
-        fi
+    # ── Step 4: Registry modules (modules.json) ──────────────────────────────
+    # Prometheus Stack, Kubernetes/Jafra/Quarkus/Prometheus/Causa MCP servers,
+    # PostgreSQL and Causa Backend — filtered by INSTALL_TARGET and ordered by
+    # depends_on.  A failing required module exits the installer.
+    registry_install_all
+    if [[ ${#REGISTRY_INSTALLED[@]} -gt 0 ]]; then
+        installed_components+=("${REGISTRY_INSTALLED[@]}")
     fi
 
     # ── Post-install summary ─────────────────────────────────────────────────
@@ -467,7 +291,7 @@ main() {
         echo -e "${COLOR_CYAN}${COLOR_BOLD}Component Installation Summary${COLOR_RESET}"
         echo -e "${COLOR_CYAN}${COLOR_BOLD}========================================${COLOR_RESET}"
         echo ""
-        for c in "${installed_components[@]}"; do
+        for c in ${installed_components[@]+"${installed_components[@]}"}; do
             echo -e "${COLOR_BOLD_GREEN}${c} ✓${COLOR_RESET}"
         done
         echo ""
@@ -490,6 +314,7 @@ main() {
 ################################################################################
 uninstall_main() {
     local start_time; start_time=$(date +%s)
+    _check_target_implemented
 
     log_file_only "Starting Causa RCA uninstallation..."
 
@@ -518,63 +343,23 @@ uninstall_main() {
         fi
     fi
 
-    start_spinner "Uninstalling Prometheus MCP Server..."
-    uninstall_prometheus_mcp_server
-    stop_spinner; log_uninstall_success "Prometheus MCP Server"
-
-    start_spinner "Uninstalling Causa MCP Server..."
-    uninstall_causa_mcp
-    stop_spinner; log_uninstall_success "Causa MCP Server"
-
-    start_spinner "Uninstalling Quarkus MCP Server..."
-    uninstall_quarkus_mcp
-    stop_spinner; log_uninstall_success "Quarkus MCP Server"
-
-    # Jafra MCP and Jafra Ecosystem are not installed on OpenShift — skip uninstall.
-    if ! _is_openshift_target; then
-        start_spinner "Uninstalling Jafra MCP Server..."
-        uninstall_jafra_mcp
-        stop_spinner; log_uninstall_success "Jafra MCP Server"
-
-        start_spinner "Uninstalling Jafra Ecosystem..."
-        uninstall_jafra
-        stop_spinner; log_uninstall_success "Jafra Ecosystem"
+    if ! registry_load; then
+        log_error "Module registry validation failed"
+        exit 1
     fi
 
-    # kind-only teardown (cert-manager, Causa Backend, Causa MCP, PostgreSQL Deployment)
+    # Registry modules in reverse install order (dependents before dependencies).
+    registry_uninstall_all
+
+    # cert-manager (kind target only — removed after Jafra, which uses it)
     if _is_kind_target; then
-        _uninstall_kind_only_components
+        start_spinner "Uninstalling cert-manager..."
+        uninstall_cert_manager
+        stop_spinner; log_uninstall_success "cert-manager"
     fi
 
-    start_spinner "Uninstalling Kubernetes MCP Server..."
-    if ! uninstall_kubernetes_mcp_server; then
-        stop_spinner; log_error "Failed to uninstall Kubernetes MCP Server"; exit 1
-    fi
-    stop_spinner; log_uninstall_success "Kubernetes MCP Server"
-
-    # Uninstall Prometheus Stack (kind target only — it was installed by us)
-    if _is_kind_target; then
-        start_spinner "Uninstalling Prometheus Stack..."
-        uninstall_prometheus
-        stop_spinner; log_uninstall_success "Prometheus Stack"
-    fi
-
-    # Uninstall OpenShift components (openshift target only)
+    # OpenShift-only teardown
     if _is_openshift_target; then
-        start_spinner "Uninstalling Causa MCP Server..."
-        uninstall_causa_mcp
-        stop_spinner; log_uninstall_success "Causa MCP Server"
-
-        start_spinner "Uninstalling Causa Backend..."
-        if ! uninstall_causa; then
-            stop_spinner; log_error "Failed to uninstall Causa Backend"; exit 1
-        fi
-        stop_spinner; log_uninstall_success "Causa Backend"
-
-        start_spinner "Uninstalling PostgreSQL..."
-        uninstall_postgres
-        stop_spinner; log_uninstall_success "PostgreSQL"
-
         start_spinner "Disabling monitoring and Prometheus alerts..."
         disable_monitoring
         stop_spinner; log_uninstall_success "Monitoring and Prometheus Alerts"
@@ -640,6 +425,7 @@ show_usage() {
     echo "    --target TARGET               Target platform (default: kind)"
     echo "                                    kind       — provisions a local Kind cluster"
     echo "                                    openshift  — deploys into an existing OpenShift cluster"
+    echo "                                    vm         — not yet supported (accepted, does nothing)"
     echo "    -n, --namespace NAMESPACE     Installation namespace (default: causa-rca)"
     echo "    -t, --terminate               Uninstall all components"
     echo "    --delete-cluster              Also delete the Kind cluster when terminating"
@@ -650,16 +436,8 @@ show_usage() {
     echo "    --cluster-name NAME           Kind cluster name (default: causa-rca)"
     echo "    --registry-port PORT          Local registry port (default: 5001)"
     echo ""
-    echo "IMAGE OVERRIDE OPTIONS:"
-    echo "    --k8s-mcp-server-image IMAGE              Override Kubernetes MCP Server image"
-    echo "    --jafra-mcp-image IMAGE                    Override Jafra MCP Server image"
-    echo "    --causa-backend-image IMAGE                Override Causa Backend image"
-    echo "    --quarkus-mcp-image IMAGE                  Override Quarkus MCP Server image"
-    echo "    --prometheus-mcp-server-image IMAGE        Override Prometheus MCP Server image"
-    echo "    --causa-mcp-image IMAGE                    Override Causa MCP Server image"
-    echo "    --jafra-controller-image IMAGE             Override Jafra Controller image"
-    echo "    --jafra-analyzer-image IMAGE               Override Jafra Analyzer image"
-    echo "    --jafra-agent-image IMAGE                  Override Jafra Agent image"
+    echo "IMAGE OVERRIDE OPTIONS (generated from lib/images.env):"
+    images_usage
     echo ""
     echo "ENVIRONMENT VARIABLES:"
     echo "    INSTALL_TARGET                Target platform (kind)"
@@ -704,9 +482,9 @@ parse_arguments() {
             --target)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --target"; show_usage; exit 2; }
                 case "$2" in
-                    kind|openshift) INSTALL_TARGET="$2" ;;
+                    kind|openshift|vm) INSTALL_TARGET="$2" ;;
                     *)
-                        log_error "Unsupported target '${2}'. Supported values: kind, openshift"
+                        log_error "Unsupported target '${2}'. Supported values: kind, openshift, vm"
                         exit 2 ;;
                 esac
                 shift 2 ;;
@@ -725,43 +503,17 @@ parse_arguments() {
             --registry-port)
                 [[ -z "${2:-}" ]] && { log_error "Value required for --registry-port"; show_usage; exit 2; }
                 KIND_REGISTRY_PORT="$2"; shift 2 ;;
-            --k8s-mcp-server-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --k8s-mcp-server-image"; show_usage; exit 2; }
-                K8S_MCP_SERVER_IMAGE="$2"; K8S_MCP_SERVER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-mcp-image"; show_usage; exit 2; }
-                JAFRA_MCP_IMAGE="$2"; JAFRA_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --causa-backend-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --causa-backend-image"; show_usage; exit 2; }
-                CAUSA_BACKEND_IMAGE="$2"; CAUSA_BACKEND_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --quarkus-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --quarkus-mcp-image"; show_usage; exit 2; }
-                QUARKUS_MCP_IMAGE="$2"; QUARKUS_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --prometheus-mcp-server-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --prometheus-mcp-server-image"; show_usage; exit 2; }
-                PROMETHEUS_MCP_SERVER_IMAGE="$2"; PROMETHEUS_MCP_SERVER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --causa-mcp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --causa-mcp-image"; show_usage; exit 2; }
-                CAUSA_MCP_IMAGE="$2"; CAUSA_MCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-controller-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-controller-image"; show_usage; exit 2; }
-                JAFRA_CONTROLLER_IMAGE="$2"; JAFRA_CONTROLLER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-analyzer-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-analyzer-image"; show_usage; exit 2; }
-                JAFRA_ANALYZER_IMAGE="$2"; JAFRA_ANALYZER_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --jafra-agent-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --jafra-agent-image"; show_usage; exit 2; }
-                JAFRA_AGENT_IMAGE="$2"; JAFRA_AGENT_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --postgres-kind-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-kind-image"; show_usage; exit 2; }
-                POSTGRES_KIND_IMAGE="$2"; POSTGRES_KIND_IMAGE_OVERRIDDEN=true; shift 2 ;;
-            --postgres-ocp-image)
-                [[ -z "${2:-}" ]] && { log_error "Value required for --postgres-ocp-image"; show_usage; exit 2; }
-                POSTGRES_OCP_IMAGE="$2"; POSTGRES_OCP_IMAGE_OVERRIDDEN=true; shift 2 ;;
             -h|--help)
                 show_usage; exit 0 ;;
             *)
-                log_error "Unknown option: $1"; show_usage; exit 2 ;;
+                # Image override flags are discovered from lib/images.env
+                if images_has_flag "$1"; then
+                    [[ -z "${2:-}" ]] && { log_error "Value required for $1"; show_usage; exit 2; }
+                    images_set_override "$1" "$2"
+                    shift 2
+                else
+                    log_error "Unknown option: $1"; show_usage; exit 2
+                fi ;;
         esac
     done
 }

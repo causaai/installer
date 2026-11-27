@@ -1,0 +1,49 @@
+# Installer-specific layer on top of the upstream overlay (../../overlays/openshift).
+# Everything under base/ and overlays/ is synced verbatim from upstream
+# causaai/causa deployment/kubernetes — put local changes HERE, never there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../overlays/openshift
+
+# Keep the legacy `app` / component labels on all objects and pod templates
+# (selectors are NOT touched) so existing NetworkPolicy, alert and
+# `oc get pods -l app=causa-backend` selectors keep matching.
+labels:
+  - pairs:
+      app: causa-backend
+      app.kubernetes.io/component: rca-engine
+    includeSelectors: false
+    includeTemplates: true
+
+# Replace upstream's default MCP config with the one listing the MCP servers
+# this installer deploys on OpenShift. Hash suffix disabled so the ConfigMap is
+# always called `causa-mcp-config`.
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: causa-mcp-config
+    behavior: replace
+    files:
+      - mcp.json=mcp.json
+
+patches:
+  # Keep the 2Gi memory limit from earlier installer releases (upstream OpenShift overlay sets 512Mi)
+  - target:
+      kind: Deployment
+      name: causa-backend
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: causa-backend
+      spec:
+        template:
+          spec:
+            containers:
+              - name: causa-backend
+                resources:
+                  limits:
+                    memory: 2Gi

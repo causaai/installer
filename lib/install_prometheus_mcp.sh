@@ -16,6 +16,9 @@
 if [[ -n "${INSTALL_PROMETHEUS_MCP_LIB_LOADED:-}" ]]; then return 0; fi
 readonly INSTALL_PROMETHEUS_MCP_LIB_LOADED=1
 
+# Seconds to wait for an MCP server Deployment to become Available
+MCP_DEPLOY_TIMEOUT="${MCP_DEPLOY_TIMEOUT:-300}"
+
 ################################################################################
 # _prometheus_mcp_not_released
 # Returns 0 (true) when PROMETHEUS_MCP_SERVER_IMAGE is unset — install is skipped.
@@ -73,7 +76,7 @@ install_prometheus_mcp_server() {
 
     if _prometheus_mcp_not_released; then
         log_warn "Prometheus MCP Server: image not configured — skipping (set PROMETHEUS_MCP_SERVER_IMAGE in lib/images.env to enable)"
-        return 0
+        return 2   # nothing deployed: module runner must not report it as installed
     fi
 
     # OpenShift is not yet supported — skip cleanly instead of falling through
@@ -81,7 +84,7 @@ install_prometheus_mcp_server() {
     # monitoring namespace, a service that doesn't exist on OpenShift).
     if [[ "${INSTALL_TARGET:-kind}" != "kind" ]]; then
         write_to_log_file "INFO" "Prometheus MCP Server: skipping — OpenShift target not yet supported"
-        return 0
+        return 2   # nothing deployed
     fi
 
     # Prometheus MCP queries Prometheus for metrics. Verify Prometheus is running.
@@ -104,7 +107,7 @@ install_prometheus_mcp_server() {
     write_to_log_file "INFO" "Using Prometheus URL: ${prometheus_url}"
 
     local tmp
-    if ! tmp=$(mktemp /tmp/causa-$$-prom-mcp-XXXXXX.yaml); then
+    if ! tmp=$(make_temp prom-mcp); then
         log_error "Failed to create temporary file for Prometheus MCP manifest"
         return 1
     fi
@@ -122,10 +125,7 @@ install_prometheus_mcp_server() {
     rm -f "${tmp}"
     write_to_log_file "SUCCESS" "Manifest applied: ${manifest}"
 
-    if ! wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" 300; then
-        log_error "Prometheus MCP Server did not become ready"
-        return 1
-    fi
+    wait_for_deployment "prometheus-mcp-server" "${INSTALL_NAMESPACE}" "${MCP_DEPLOY_TIMEOUT}" || return 1
 
     write_to_log_file "SUCCESS" "Prometheus MCP Server installed"
     write_to_log_file "INFO"    "Internal URL: http://prometheus-mcp-server.${INSTALL_NAMESPACE}.svc.cluster.local:8080"
@@ -163,6 +163,14 @@ uninstall_prometheus_mcp_server() {
     return 0
 }
 
+################################################################################
+# prometheus_mcp_health — post-install health check used by registry_check_health
+################################################################################
+prometheus_mcp_health() {
+    check_deployment_healthy "prometheus-mcp-server"
+}
+
 export -f discover_prometheus_url
 export -f install_prometheus_mcp_server
 export -f uninstall_prometheus_mcp_server
+export -f prometheus_mcp_health
